@@ -4,187 +4,952 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Zeiterfassung</title>
-
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-
 <style>
-/* ====== DEIN GANZES CSS BLEIBT UNVERÄNDERT ====== */
-/* (Ich lasse es hier gekürzt, weil es sonst zu lang wird – dein CSS bleibt 그대로) */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --primary: #4F46E5; --primary-dark: #4338CA; --primary-light: #EEF2FF;
+  --success: #10B981; --success-light: #D1FAE5;
+  --danger: #EF4444; --danger-light: #FEE2E2;
+  --warning: #F59E0B; --warning-light: #FEF3C7;
+  --gray-50:#F9FAFB; --gray-100:#F3F4F6; --gray-200:#E5E7EB;
+  --gray-400:#9CA3AF; --gray-500:#6B7280; --gray-700:#374151; --gray-900:#111827;
+  --radius:12px; --shadow:0 1px 3px rgba(0,0,0,.1),0 1px 2px rgba(0,0,0,.06);
+  --shadow-lg:0 10px 25px rgba(0,0,0,.12);
+}
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--gray-50); color:var(--gray-900); min-height:100vh; }
+
+/* LOADING */
+.loading-overlay { position:fixed; inset:0; background:rgba(255,255,255,.95); display:flex; align-items:center; justify-content:center; z-index:999; flex-direction:column; gap:16px; }
+.loading-spinner { width:40px; height:40px; border:3px solid var(--gray-200); border-top-color:var(--primary); border-radius:50%; animation:spin 0.8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* NAV */
+header { background:white; border-bottom:1px solid var(--gray-200); padding:0 24px; height:60px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:100; }
+.logo { font-size:18px; font-weight:700; color:var(--primary); letter-spacing:-.5px; }
+.logo span { color:var(--gray-900); }
+.nav-tabs { display:flex; gap:4px; align-items:center; }
+.nav-tab { padding:6px 16px; border-radius:8px; font-size:13px; font-weight:500; cursor:pointer; border:none; background:none; color:var(--gray-500); transition:all .15s; }
+.nav-tab.active { background:var(--primary-light); color:var(--primary); }
+.nav-tab:hover:not(.active) { background:var(--gray-100); }
+
+/* SYNC INDICATOR */
+.sync-indicator {
+  display:flex; align-items:center; gap:6px; margin-left:8px;
+  font-size:12px; font-weight:500; color:var(--gray-500);
+  padding:4px 10px; border-radius:999px; background:var(--gray-100);
+  transition:all .3s; cursor:default; user-select:none;
+}
+.sync-indicator.saving { color:var(--primary); background:var(--primary-light); }
+.sync-indicator.synced { color:var(--success); background:var(--success-light); }
+.sync-indicator.error  { color:var(--danger); background:var(--danger-light); }
+.sync-dot { width:7px; height:7px; border-radius:50%; background:currentColor; flex-shrink:0; }
+.sync-dot.spinning { width:12px; height:12px; border-radius:50%; border:2px solid currentColor; border-top-color:transparent; animation:spin .7s linear infinite; background:none; }
+
+main { max-width:960px; margin:0 auto; padding:24px 16px; }
+
+/* PAGE */
+.page { display:none; }
+.page.active { display:block; }
+
+/* CARDS */
+.card { background:white; border-radius:var(--radius); box-shadow:var(--shadow); padding:24px; }
+.card + .card, .card + .stats-row, .stats-row + .card { margin-top:16px; }
+
+/* TRACKER */
+.tracker-top { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; }
+.clock-display { font-size:52px; font-weight:700; letter-spacing:-2px; color:var(--gray-900); font-variant-numeric:tabular-nums; line-height:1; }
+.clock-display.running { color:var(--primary); }
+.status-badge { display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:500; padding:5px 12px; border-radius:999px; background:var(--gray-100); color:var(--gray-500); }
+.status-badge.running { background:var(--primary-light); color:var(--primary); }
+.status-dot { width:7px; height:7px; border-radius:50%; background:var(--gray-400); }
+.status-badge.running .status-dot { background:var(--primary); animation:pulse 1.5s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+.tracker-activity { margin-top:20px; display:flex; gap:12px; align-items:center; }
+.activity-input { flex:1; border:1.5px solid var(--gray-200); border-radius:8px; padding:10px 14px; font-size:14px; color:var(--gray-900); background:var(--gray-50); outline:none; transition:border-color .15s; }
+.activity-input:focus { border-color:var(--primary); background:white; }
+.activity-input::placeholder { color:var(--gray-400); }
+
+/* BUTTONS */
+.btn { display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; border:none; transition:all .15s; white-space:nowrap; }
+.btn-primary { background:var(--primary); color:white; }
+.btn-primary:hover { background:var(--primary-dark); transform:translateY(-1px); }
+.btn-stop { background:var(--danger); color:white; }
+.btn-stop:hover { background:#DC2626; }
+.btn-ghost { background:none; border:1px solid var(--gray-200); color:var(--gray-700); }
+.btn-ghost:hover { background:var(--gray-100); }
+.btn-sm { padding:6px 14px; font-size:13px; }
+
+/* STATS */
+.stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
+.stat-card { background:white; border-radius:var(--radius); box-shadow:var(--shadow); padding:16px 20px; }
+.stat-label { font-size:11px; font-weight:500; color:var(--gray-500); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+.stat-value { font-size:22px; font-weight:700; color:var(--gray-900); letter-spacing:-.5px; }
+.stat-value.positive { color:var(--success); }
+.stat-value.negative { color:var(--danger); }
+.stat-value.money { color:#7C3AED; }
+.stat-sub { font-size:12px; color:var(--gray-400); margin-top:2px; }
+
+/* SECTION HEADER */
+.section-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.section-title { font-size:15px; font-weight:600; color:var(--gray-700); }
+.week-nav { display:flex; align-items:center; gap:8px; }
+.week-nav button { background:none; border:1px solid var(--gray-200); border-radius:6px; width:30px; height:30px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--gray-500); font-size:16px; transition:all .15s; }
+.week-nav button:hover { background:var(--gray-100); }
+.week-label { font-size:13px; color:var(--gray-500); min-width:130px; text-align:center; }
+
+/* ENTRIES */
+.entries-container { background:white; border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; }
+.day-header { display:flex; align-items:center; justify-content:space-between; padding:10px 20px; background:var(--gray-50); border-bottom:1px solid var(--gray-200); }
+.day-name { font-size:13px; font-weight:600; color:var(--gray-700); }
+.day-total { font-size:13px; font-weight:600; color:var(--gray-700); }
+.target-indicator { font-size:11px; font-weight:400; margin-left:6px; padding:2px 7px; border-radius:999px; }
+.target-ok { background:var(--success-light); color:var(--success); }
+.target-over { background:var(--warning-light); color:var(--warning); }
+.target-under { background:var(--danger-light); color:var(--danger); }
+.entry-row { display:flex; align-items:center; padding:11px 20px; border-bottom:1px solid var(--gray-100); gap:12px; transition:background .1s; }
+.entry-row:hover { background:var(--gray-50); }
+.entry-row:last-child { border-bottom:none; }
+.entry-time { font-size:13px; color:var(--gray-500); min-width:110px; font-variant-numeric:tabular-nums; }
+.entry-activity { flex:1; font-size:14px; color:var(--gray-900); }
+.entry-activity.empty { color:var(--gray-400); font-style:italic; }
+.entry-duration { font-size:13px; font-weight:600; color:var(--gray-700); min-width:50px; text-align:right; }
+.entry-actions { display:flex; gap:4px; opacity:0; transition:opacity .1s; }
+.entry-row:hover .entry-actions { opacity:1; }
+.icon-btn { background:none; border:none; cursor:pointer; width:28px; height:28px; border-radius:6px; display:flex; align-items:center; justify-content:center; color:var(--gray-400); transition:all .1s; font-size:14px; }
+.icon-btn:hover { background:var(--gray-100); color:var(--gray-700); }
+.icon-btn.danger:hover { background:var(--danger-light); color:var(--danger); }
+.empty-state { text-align:center; padding:40px 24px; color:var(--gray-400); font-size:14px; }
+
+/* MONTHLY OVERVIEW TABLE */
+.overview-table { width:100%; border-collapse:collapse; font-size:13px; }
+.overview-table th { text-align:left; padding:10px 14px; font-size:11px; font-weight:600; color:var(--gray-500); text-transform:uppercase; letter-spacing:.5px; border-bottom:2px solid var(--gray-200); background:var(--gray-50); }
+.overview-table td { padding:11px 14px; border-bottom:1px solid var(--gray-100); }
+.overview-table tr:last-child td { border-bottom:none; }
+.overview-table tr:hover td { background:var(--gray-50); }
+.month-cell { font-weight:600; }
+.month-cell.current { color:var(--primary); }
+.month-cell.future { color:var(--gray-400); }
+.ot-positive { color:var(--success); font-weight:600; }
+.ot-negative { color:var(--danger); font-weight:600; }
+.money-cell { color:#7C3AED; font-weight:600; }
+
+/* SETTINGS */
+.settings-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.form-group { margin-bottom:16px; }
+.form-label { display:block; font-size:13px; font-weight:500; color:var(--gray-700); margin-bottom:6px; }
+.form-input { width:100%; border:1.5px solid var(--gray-200); border-radius:8px; padding:9px 12px; font-size:14px; outline:none; transition:border-color .15s; }
+.form-input:focus { border-color:var(--primary); }
+.settings-hint { font-size:12px; color:var(--gray-400); margin-top:4px; }
+
+/* CODE BOX */
+.code-box { display:flex; gap:8px; align-items:center; }
+.code-display { flex:1; font-family:monospace; font-size:13px; background:var(--gray-50); border:1.5px solid var(--gray-200); border-radius:8px; padding:9px 12px; color:var(--gray-700); letter-spacing:.5px; word-break:break-all; }
+
+/* MODAL */
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px; }
+.modal { background:white; border-radius:var(--radius); box-shadow:var(--shadow-lg); padding:28px; width:100%; max-width:420px; }
+.modal h3 { font-size:16px; font-weight:700; margin-bottom:20px; }
+.modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:24px; }
+
+/* IMPORT */
+.import-table { width:100%; border-collapse:collapse; font-size:13px; margin-top:12px; }
+.import-table th, .import-table td { padding:8px 12px; border:1px solid var(--gray-200); text-align:left; }
+.import-table th { background:var(--gray-50); font-weight:600; }
+
+@media(max-width:700px){
+  .stats-row{grid-template-columns:1fr 1fr;}
+  .clock-display{font-size:36px;}
+  .settings-grid{grid-template-columns:1fr;}
+}
 </style>
 </head>
-
 <body>
 
-<!-- LOADING -->
+<!-- LOADING OVERLAY -->
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loading-spinner"></div>
-  <p>Daten werden geladen…</p>
+  <p style="color:var(--gray-500);font-size:14px;">Daten werden geladen…</p>
+</div>
+
+<!-- CODE ENTRY MODAL (for new devices / incognito) -->
+<div class="modal-overlay" id="codeModal" style="display:none;">
+  <div class="modal">
+    <h3>Zugangscode</h3>
+    <p style="font-size:13px;color:var(--gray-500);margin-bottom:20px;">
+      Du hast noch keinen Zugangscode auf diesem Gerät. Gib deinen bestehenden Code ein — oder erstelle ein neues Konto.
+    </p>
+    <div class="form-group">
+      <label class="form-label">Bestehender Zugangscode</label>
+      <input type="text" class="form-input" id="codeInput" placeholder="Zugangscode eingeben…" style="font-family:monospace;font-size:13px;">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="startFresh()">Neues Konto</button>
+      <button class="btn btn-primary" onclick="applyCode()">Code übernehmen</button>
+    </div>
+  </div>
 </div>
 
 <header>
   <div class="logo">Zeit<span>erfassung</span></div>
+  <nav class="nav-tabs">
+    <button class="nav-tab active" onclick="showPage('tracker')">⏱ Tracker</button>
+    <button class="nav-tab" onclick="showPage('overview')">📊 Übersicht</button>
+    <button class="nav-tab" onclick="showPage('settings')">⚙️ Einstellungen</button>
+    <div class="sync-indicator" id="syncIndicator" title="Sync-Status">
+      <span class="sync-dot" id="syncDot"></span>
+      <span id="syncLabel">–</span>
+    </div>
+  </nav>
 </header>
 
 <main>
 
-<!-- TRACKER -->
-<div class="card">
-  <div class="clock-display" id="clockDisplay">00:00:00</div>
-
-  <div id="trackerBtn">
-    <button class="btn btn-primary" onclick="startTimer()">▶ Starten</button>
+<!-- ═══ TRACKER PAGE ═══ -->
+<div class="page active" id="page-tracker">
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">Heute</div>
+      <div class="stat-value" id="statToday">0:00</div>
+      <div class="stat-sub" id="statTodaySub">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Diese Woche</div>
+      <div class="stat-value" id="statWeek">0:00</div>
+      <div class="stat-sub" id="statWeekSub">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Diesen Monat</div>
+      <div class="stat-value money" id="statMonthEarnings">0,00 €</div>
+      <div class="stat-sub" id="statMonthHours">0:00 Std.</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Überstunden gesamt</div>
+      <div class="stat-value" id="statOvertimeTotal">0:00</div>
+      <div class="stat-sub">kumuliert</div>
+    </div>
   </div>
 
-  <div class="tracker-activity" id="trackerActivity" style="display:none;">
-    <input type="text" id="activityInput" placeholder="Woran arbeitest du?">
+  <div class="card" style="margin-bottom:16px;">
+    <div class="tracker-top">
+      <div>
+        <div class="clock-display" id="clockDisplay">00:00:00</div>
+        <div style="margin-top:8px;">
+          <span class="status-badge" id="statusBadge">
+            <span class="status-dot"></span> Nicht gestartet
+          </span>
+        </div>
+      </div>
+      <div id="trackerBtn">
+        <button class="btn btn-primary" onclick="startTimer()" style="padding:14px 28px;font-size:15px;">▶ Starten</button>
+      </div>
+    </div>
+    <div class="tracker-activity" id="trackerActivity" style="display:none;">
+      <input type="text" class="activity-input" id="activityInput" placeholder="Woran arbeitest du?" maxlength="120">
+    </div>
+  </div>
+
+  <div class="section-header">
+    <span class="section-title">Einträge</span>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button class="btn btn-ghost btn-sm" onclick="openAddModal()">+ Eintrag</button>
+      <div class="week-nav">
+        <button onclick="prevWeek()">‹</button>
+        <span class="week-label" id="weekLabel"></span>
+        <button onclick="nextWeek()">›</button>
+      </div>
+    </div>
+  </div>
+  <div class="entries-container" id="entriesContainer"></div>
+</div>
+
+<!-- ═══ OVERVIEW PAGE ═══ -->
+<div class="page" id="page-overview">
+  <div class="stats-row" style="grid-template-columns:repeat(3,1fr);">
+    <div class="stat-card">
+      <div class="stat-label">Gesamte Überstunden</div>
+      <div class="stat-value" id="ovTotalOT">0:00</div>
+      <div class="stat-sub">alle Monate</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Gesamtverdienst</div>
+      <div class="stat-value money" id="ovTotalEarnings">0,00 €</div>
+      <div class="stat-sub">alle Monate</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Überstunden (ohne akt. Monat)</div>
+      <div class="stat-value" id="ovTotalOTExcl">0:00</div>
+      <div class="stat-sub">kumuliert</div>
+    </div>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table class="overview-table">
+      <thead>
+        <tr>
+          <th>Monat</th><th>Stunden</th><th>Verdienst</th>
+          <th>Überstunden</th><th>Sollstunden (Monat)</th><th>Notiz</th>
+        </tr>
+      </thead>
+      <tbody id="overviewBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══ SETTINGS PAGE ═══ -->
+<div class="page" id="page-settings">
+  <div class="card">
+    <h3 style="font-size:15px;font-weight:700;margin-bottom:20px;">Einstellungen</h3>
+    <div class="settings-grid">
+      <div class="form-group">
+        <label class="form-label">Stundenlohn (€)</label>
+        <input type="number" class="form-input" id="setHourlyRate" value="15.20" step="0.01" min="1">
+        <div class="settings-hint">Dein aktueller Stundenlohn</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Stunden pro Woche (Soll)</label>
+        <input type="number" class="form-input" id="setWeeklyHours" value="15" step="0.5" min="1">
+        <div class="settings-hint">Vertragliche Wochenstunden</div>
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="saveSettings()">Speichern</button>
+  </div>
+
+  <!-- ACCESS CODE -->
+  <div class="card" style="margin-top:16px;">
+    <h3 style="font-size:15px;font-weight:700;margin-bottom:8px;">🔑 Zugangscode</h3>
+    <p style="font-size:13px;color:var(--gray-500);margin-bottom:16px;">
+      Kopiere diesen Code und füge ihn auf einem anderen Gerät oder im Inkognito-Modus ein, um auf deine Daten zuzugreifen.
+    </p>
+    <div class="code-box">
+      <div class="code-display" id="currentCodeDisplay">–</div>
+      <button class="btn btn-ghost btn-sm" onclick="copyCode()">📋 Kopieren</button>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+      <input type="text" class="form-input" id="newCodeInput" placeholder="Anderen Code eingeben…" style="font-family:monospace;font-size:13px;">
+      <button class="btn btn-primary btn-sm" onclick="switchCode()">Wechseln</button>
+    </div>
+    <div class="settings-hint" style="margin-top:8px;">⚠️ Nach dem Wechsel werden die Daten dieses Codes geladen.</div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3 style="font-size:15px;font-weight:700;margin-bottom:16px;">Historische Daten importieren</h3>
+    <p style="font-size:13px;color:var(--gray-500);margin-bottom:16px;">
+      Trage deine bestehenden Monatsdaten direkt ein, damit Überstunden-Saldo und Verdienst korrekt berechnet werden.
+    </p>
+    <div id="historicalEntries"></div>
+    <button class="btn btn-ghost btn-sm" onclick="addHistoricalRow()" style="margin-top:12px;">+ Monat hinzufügen</button>
+    <button class="btn btn-primary btn-sm" onclick="saveHistorical()" style="margin-top:12px;margin-left:8px;">Speichern</button>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3 style="font-size:15px;font-weight:700;margin-bottom:12px;">Daten</h3>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-ghost btn-sm" onclick="exportData()">📥 Export (JSON)</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importFile').click()">📤 Import (JSON)</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(this)">
+      <button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="clearAll()">🗑 Alle Daten löschen</button>
+    </div>
   </div>
 </div>
 
 </main>
 
-<script>
+<!-- ENTRY MODAL -->
+<div class="modal-overlay" id="modalOverlay" style="display:none;" onclick="closeModal(event)">
+  <div class="modal">
+    <h3 id="modalTitle">Eintrag bearbeiten</h3>
+    <input type="hidden" id="editId">
+    <div class="form-group">
+      <label class="form-label">Datum</label>
+      <input type="date" class="form-input" id="editDate">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Startzeit</label>
+      <input type="time" class="form-input" id="editStart">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Endzeit</label>
+      <input type="time" class="form-input" id="editEnd">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Tätigkeit</label>
+      <input type="text" class="form-input" id="editActivity" placeholder="Woran hast du gearbeitet?">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="saveEntry()">Speichern</button>
+    </div>
+  </div>
+</div>
 
-/* ===================== SUPABASE ===================== */
+<script>
+// ─── SUPABASE ─────────────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://rriernloikzahjxzhegb.supabase.co';
-const SUPABASE_KEY = 'YOUR_KEY';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJyaWVybmxvaWt6YWhqeHpoZWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4NzcwNzgsImV4cCI6MjA5MDQ1MzA3OH0.AnH9_ReKvfrBxPk36wyDh1tUf-tn28rS6lZf2v9wexc';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-/* ===================== TIMER STATES ===================== */
-let timerStart = null;
-let timerInterval = null;
+// ─── DEVICE ID ────────────────────────────────────────────────────────────────
+function getDeviceId() { return localStorage.getItem('ze_device_id') || null; }
+function setDeviceId(id) {
+  localStorage.setItem('ze_device_id', id);
+  document.getElementById('currentCodeDisplay').textContent = id;
+}
 
-let pauseStart = null;
-let totalPausedMs = 0;
-let isPaused = false;
+// ─── SYNC INDICATOR ───────────────────────────────────────────────────────────
+let _syncTimer = null;
+function setSyncStatus(state) { // 'saving' | 'synced' | 'error'
+  const el = document.getElementById('syncIndicator');
+  const dot = document.getElementById('syncDot');
+  const lbl = document.getElementById('syncLabel');
+  el.className = 'sync-indicator ' + state;
+  if (state === 'saving') {
+    dot.className = 'sync-dot spinning';
+    lbl.textContent = 'Wird gespeichert…';
+    clearTimeout(_syncTimer);
+  } else if (state === 'synced') {
+    dot.className = 'sync-dot';
+    lbl.textContent = 'Gespeichert';
+    clearTimeout(_syncTimer);
+    _syncTimer = setTimeout(() => {
+      el.className = 'sync-indicator';
+      dot.className = 'sync-dot';
+      lbl.textContent = '–';
+    }, 3000);
+  } else {
+    dot.className = 'sync-dot';
+    lbl.textContent = 'Fehler';
+  }
+}
 
-/* ===================== HELPERS ===================== */
-function fmtMs(ms){
-  const s=Math.floor(ms/1000);
-  const h=Math.floor(s/3600);
-  const m=Math.floor((s%3600)/60);
-  const sec=s%60;
+async function withSync(fn) {
+  setSyncStatus('saving');
+  try {
+    await fn();
+    setSyncStatus('synced');
+  } catch(e) {
+    setSyncStatus('error');
+    console.error(e);
+    throw e;
+  }
+}
+
+// ─── IN-MEMORY CACHE ──────────────────────────────────────────────────────────
+const _cache = {
+  entries: [],
+  settings: { hourlyRate: 15.20, weeklyHours: 15 },
+  historical: []
+};
+function loadEntries()    { return _cache.entries; }
+function loadSettings()   { return _cache.settings; }
+function loadHistorical() { return _cache.historical; }
+
+async function fetchAll() {
+  const did = getDeviceId();
+  if (!did) return;
+  const [eRes, sRes, hRes] = await Promise.all([
+    sb.from('ze_entries').select('*').eq('user_id', did).order('date').order('start_time'),
+    sb.from('ze_settings').select('*').eq('user_id', did).maybeSingle(),
+    sb.from('ze_historical').select('*').eq('user_id', did).order('year_month')
+  ]);
+  if (eRes.data) {
+    _cache.entries = eRes.data.map(r => ({
+      id: r.id, date: r.date,
+      start: r.start_time.slice(0,5), end: r.end_time.slice(0,5),
+      activity: r.activity || ''
+    }));
+  }
+  if (sRes.data) {
+    _cache.settings = {
+      hourlyRate: parseFloat(sRes.data.hourly_rate),
+      weeklyHours: parseFloat(sRes.data.weekly_hours)
+    };
+  }
+  if (hRes.data) {
+    _cache.historical = hRes.data.map(r => ({
+      ym: r.year_month, hours: r.hours, overtime: r.overtime,
+      targetHours: r.target_hours, note: r.note || ''
+    }));
+  }
+  return { entries: _cache.entries, historical: _cache.historical, settings: _cache.settings };
+}
+
+// ─── CODE MODAL ───────────────────────────────────────────────────────────────
+function startFresh() {
+  const newId = crypto.randomUUID();
+  setDeviceId(newId);
+  document.getElementById('codeModal').style.display = 'none';
+  continueInit();
+}
+
+async function applyCode() {
+  const code = document.getElementById('codeInput').value.trim();
+  if (!code) { showToast('Bitte Code eingeben'); return; }
+  setDeviceId(code.toLowerCase().trim());
+  document.getElementById('codeModal').style.display = 'none';
+  document.getElementById('loadingOverlay').style.display = 'flex';
+  await continueInit();
+}
+
+async function switchCode() {
+  const code = document.getElementById('newCodeInput').value.trim();
+  if (!code) { showToast('Bitte Code eingeben'); return; }
+  if (!confirm(`Zu Code "${code}" wechseln? Die Daten dieses Codes werden geladen.`)) return;
+  setDeviceId(code);
+  document.getElementById('newCodeInput').value = '';
+  document.getElementById('loadingOverlay').style.display = 'flex';
+  await fetchAll();
+  document.getElementById('setHourlyRate').value = _cache.settings.hourlyRate;
+  document.getElementById('setWeeklyHours').value = _cache.settings.weeklyHours;
+  renderStats(); renderEntries(); renderHistoricalForm();
+  document.getElementById('loadingOverlay').style.display = 'none';
+  showToast('Code gewechselt ✓');
+}
+
+function copyCode() {
+  const code = getDeviceId();
+  if (!code) return;
+  navigator.clipboard.writeText(code).then(() => showToast('Code kopiert ✓'));
+}
+
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const MONTH_NAMES = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+const DAY_FULL = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+function toDateStr(d) { return d.toISOString().slice(0,10); }
+function toTimeStr(d) { return d.toTimeString().slice(0,5); }
+function parseHM(str) {
+  if (!str) return 0;
+  const neg = str.startsWith('-');
+  const parts = str.replace('-','').split(':');
+  return (neg ? -1 : 1) * (parseInt(parts[0])*60 + parseInt(parts[1]||0));
+}
+function fmtMinutes(mins) {
+  const neg = mins < 0, abs = Math.abs(mins);
+  return (neg?'-':'') + Math.floor(abs/60) + ':' + String(abs%60).padStart(2,'0');
+}
+function fmtMs(ms) {
+  const s=Math.floor(ms/1000), h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
   return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
 }
+function entryDurMs(e) {
+  const [sh,sm]=e.start.split(':').map(Number), [eh,em]=e.end.split(':').map(Number);
+  return ((eh*60+em)-(sh*60+sm))*60000;
+}
+function getWeekDates(offset=0) {
+  const now=new Date(), day=now.getDay();
+  const mon=new Date(now);
+  mon.setDate(now.getDate()-((day+6)%7)+offset*7);
+  mon.setHours(0,0,0,0);
+  return Array.from({length:7},(_,i)=>{ const d=new Date(mon); d.setDate(mon.getDate()+i); return toDateStr(d); });
+}
+function formatEuro(e) { return e.toLocaleString('de-DE',{style:'currency',currency:'EUR'}); }
 
-function toTimeStr(d){
-  return d.toTimeString().slice(0,5);
+// ─── NAVIGATION ───────────────────────────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  event.target.classList.add('active');
+  if (name==='overview') renderOverview();
+  if (name==='settings') { renderHistoricalForm(); document.getElementById('currentCodeDisplay').textContent = getDeviceId() || '–'; }
 }
 
-function toDateStr(d){
-  return d.toISOString().slice(0,10);
+// ─── TIMER ────────────────────────────────────────────────────────────────────
+let timerInterval=null, timerStart=null, currentWeekOffset=0;
+
+function startTimer() {
+  timerStart=Date.now();
+  localStorage.setItem('ze_running',timerStart);
+  document.getElementById('trackerActivity').style.display='flex';
+  document.getElementById('activityInput').focus();
+  document.getElementById('trackerBtn').innerHTML=
+    `<button class="btn btn-stop" onclick="stopTimer()" style="padding:14px 28px;font-size:15px;">⏹ Stoppen</button>`;
+  const b=document.getElementById('statusBadge');
+  b.className='status-badge running';
+  b.innerHTML=`<span class="status-dot"></span> Läuft`;
+  document.getElementById('clockDisplay').classList.add('running');
+  timerInterval=setInterval(()=>{ document.getElementById('clockDisplay').textContent=fmtMs(Date.now()-timerStart); },1000);
 }
 
-/* ===================== START TIMER ===================== */
-function startTimer(){
-  timerStart = Date.now();
-  totalPausedMs = 0;
-  isPaused = false;
+async function stopTimer() {
+  if(!timerStart) return;
+  clearInterval(timerInterval); timerInterval=null;
+  const end=Date.now();
+  const activity=document.getElementById('activityInput').value.trim();
+  const s=new Date(timerStart), e=new Date(end);
+  const entry={id:crypto.randomUUID(),date:toDateStr(s),start:toTimeStr(s),end:toTimeStr(e),activity};
 
-  document.getElementById('trackerActivity').style.display='block';
+  await withSync(async () => {
+    const { error } = await sb.from('ze_entries').insert({
+      id:entry.id, user_id:getDeviceId(),
+      date:entry.date, start_time:entry.start+':00', end_time:entry.end+':00', activity:entry.activity
+    });
+    if (error) throw error;
+    _cache.entries.push(entry);
+  });
 
-  document.getElementById('trackerBtn').innerHTML = `
-    <button class="btn btn-ghost" onclick="pauseTimer()">⏸ Pause</button>
-    <button class="btn btn-stop" onclick="stopTimer()">⏹ Stoppen</button>
-  `;
-
-  timerInterval = setInterval(()=>{
-    document.getElementById('clockDisplay').textContent =
-      fmtMs(Date.now() - timerStart - totalPausedMs);
-  },1000);
+  timerStart=null; localStorage.removeItem('ze_running');
+  document.getElementById('clockDisplay').textContent='00:00:00';
+  document.getElementById('clockDisplay').classList.remove('running');
+  document.getElementById('activityInput').value='';
+  document.getElementById('trackerActivity').style.display='none';
+  document.getElementById('trackerBtn').innerHTML=
+    `<button class="btn btn-primary" onclick="startTimer()" style="padding:14px 28px;font-size:15px;">▶ Starten</button>`;
+  const b=document.getElementById('statusBadge');
+  b.className='status-badge'; b.innerHTML=`<span class="status-dot"></span> Nicht gestartet`;
+  renderStats(); renderEntries();
 }
 
-/* ===================== PAUSE ===================== */
-function pauseTimer(){
-  if(isPaused || !timerStart) return;
-
-  isPaused = true;
-  pauseStart = Date.now();
-
-  clearInterval(timerInterval);
-
-  document.getElementById('trackerBtn').innerHTML = `
-    <button class="btn btn-primary" onclick="resumeTimer()">▶ Weiter</button>
-    <button class="btn btn-stop" onclick="stopTimer()">⏹ Stoppen</button>
-  `;
+function resumeTimer() {
+  const s=localStorage.getItem('ze_running'); if(!s) return;
+  timerStart=parseInt(s);
+  document.getElementById('trackerActivity').style.display='flex';
+  document.getElementById('trackerBtn').innerHTML=
+    `<button class="btn btn-stop" onclick="stopTimer()" style="padding:14px 28px;font-size:15px;">⏹ Stoppen</button>`;
+  const b=document.getElementById('statusBadge');
+  b.className='status-badge running'; b.innerHTML=`<span class="status-dot"></span> Läuft`;
+  document.getElementById('clockDisplay').classList.add('running');
+  timerInterval=setInterval(()=>{ document.getElementById('clockDisplay').textContent=fmtMs(Date.now()-timerStart); },1000);
 }
 
-/* ===================== RESUME ===================== */
-function resumeTimer(){
-  if(!isPaused) return;
-
-  totalPausedMs += Date.now() - pauseStart;
-  isPaused = false;
-
-  document.getElementById('trackerBtn').innerHTML = `
-    <button class="btn btn-ghost" onclick="pauseTimer()">⏸ Pause</button>
-    <button class="btn btn-stop" onclick="stopTimer()">⏹ Stoppen</button>
-  `;
-
-  timerInterval = setInterval(()=>{
-    document.getElementById('clockDisplay').textContent =
-      fmtMs(Date.now() - timerStart - totalPausedMs);
-  },1000);
+// ─── STATS ────────────────────────────────────────────────────────────────────
+function getMonthlyTargetMins(ym) {
+  const hist=loadHistorical().find(h=>h.ym===ym);
+  if(hist&&hist.targetHours) return parseHM(hist.targetHours);
+  return Math.round(loadSettings().weeklyHours*4.333*60);
+}
+function computeTotalOvertimeMins() {
+  const entries=loadEntries(), hist=loadHistorical();
+  let total=hist.reduce((s,h)=>s+parseHM(h.overtime),0);
+  const histYMs=new Set(hist.map(h=>h.ym)), byMonth={};
+  entries.forEach(e=>{ const ym=e.date.slice(0,7); if(!histYMs.has(ym)){if(!byMonth[ym])byMonth[ym]=0;byMonth[ym]+=Math.round(entryDurMs(e)/60000);} });
+  Object.entries(byMonth).forEach(([ym,mins])=>{ total+=mins-getMonthlyTargetMins(ym); });
+  return total;
+}
+function renderStats() {
+  const {hourlyRate,weeklyHours}=loadSettings(), entries=loadEntries();
+  const today=toDateStr(new Date()), weekDates=getWeekDates(0), currentYM=today.slice(0,7);
+  const todayMins=entries.filter(e=>e.date===today).reduce((s,e)=>s+Math.round(entryDurMs(e)/60000),0);
+  document.getElementById('statToday').textContent=fmtMinutes(todayMins);
+  document.getElementById('statTodaySub').textContent='heute';
+  const weekMins=entries.filter(e=>weekDates.includes(e.date)).reduce((s,e)=>s+Math.round(entryDurMs(e)/60000),0);
+  const weekTarget=Math.round(weeklyHours*60), weekOT=weekMins-weekTarget;
+  document.getElementById('statWeek').textContent=fmtMinutes(weekMins);
+  document.getElementById('statWeekSub').textContent=`Soll: ${fmtMinutes(weekTarget)} | ${weekOT>=0?'+':''}${fmtMinutes(weekOT)}`;
+  const monthMins=entries.filter(e=>e.date.slice(0,7)===currentYM).reduce((s,e)=>s+Math.round(entryDurMs(e)/60000),0);
+  document.getElementById('statMonthEarnings').textContent=formatEuro((monthMins/60)*hourlyRate);
+  document.getElementById('statMonthHours').textContent=fmtMinutes(monthMins)+' Std.';
+  const totalOT=computeTotalOvertimeMins();
+  const otEl=document.getElementById('statOvertimeTotal');
+  otEl.textContent=(totalOT>=0?'+':'')+fmtMinutes(totalOT);
+  otEl.className='stat-value '+(totalOT>0?'positive':totalOT<0?'negative':'');
 }
 
-/* ===================== STOP TIMER ===================== */
-async function stopTimer(){
-  const endTime = Date.now() - totalPausedMs;
+// ─── ENTRIES (week view) ──────────────────────────────────────────────────────
+function renderEntries() {
+  const {weeklyHours}=loadSettings();
+  const dailyTargetMins=Math.round(weeklyHours/5*60);
+  const weekDates=getWeekDates(currentWeekOffset);
+  const entries=loadEntries();
+  const first=new Date(weekDates[0]+'T00:00'), last=new Date(weekDates[6]+'T00:00');
+  document.getElementById('weekLabel').textContent=
+    `${first.getDate()}. ${MONTH_NAMES[first.getMonth()]} – ${last.getDate()}. ${MONTH_NAMES[last.getMonth()]}`;
+  const weekEntries=entries.filter(e=>weekDates.includes(e.date));
+  const container=document.getElementById('entriesContainer');
+  if(!weekEntries.length){
+    container.innerHTML=`<div class="empty-state">Keine Einträge in dieser Woche.<br><small>Starte den Timer oder füge manuell einen Eintrag hinzu.</small></div>`;
+    return;
+  }
+  const byDay={}; weekDates.forEach(d=>{byDay[d]=[];}); weekEntries.forEach(e=>byDay[e.date].push(e));
+  let html='';
+  weekDates.forEach(dateStr=>{
+    const d=new Date(dateStr+'T00:00');
+    const isSunday=d.getDay()===0;
+    const dayEntries=byDay[dateStr]; if(!dayEntries.length) return; // leere Tage (inkl. leere Sonntage) überspringen
+    dayEntries.sort((a,b)=>a.start.localeCompare(b.start));
+    const dayMins=dayEntries.reduce((s,e)=>s+Math.round(entryDurMs(e)/60000),0);
+    const diff=dayMins-dailyTargetMins;
+    const isToday=dateStr===toDateStr(new Date());
+    // Sonntage zeigen, aber kein Überstunden-Badge (kein Arbeitssoll)
+    const badge=isSunday?''
+               :diff>60?`<span class="target-indicator target-over">+${fmtMinutes(diff)}</span>`
+               :diff<-60?`<span class="target-indicator target-under">${fmtMinutes(diff)}</span>`
+               :`<span class="target-indicator target-ok">✓</span>`;
+    html+=`<div class="day-group"><div class="day-header">
+      <span class="day-name">${DAY_FULL[d.getDay()]}, ${d.getDate()}. ${MONTH_NAMES[d.getMonth()]}${isToday?' · Heute':''}</span>
+      <span class="day-total">${fmtMinutes(dayMins)} Std. ${badge}</span>
+    </div>`;
+    dayEntries.forEach(e=>{
+      const dur=Math.round(entryDurMs(e)/60000);
+      html+=`<div class="entry-row">
+        <span class="entry-time">${e.start} – ${e.end}</span>
+        <span class="entry-activity ${e.activity?'':'empty'}">${e.activity||'Keine Beschreibung'}</span>
+        <span class="entry-duration">${fmtMinutes(dur)}</span>
+        <div class="entry-actions">
+          <button class="icon-btn" onclick="openEditModal('${e.id}')">✏️</button>
+          <button class="icon-btn danger" onclick="deleteEntry('${e.id}')">🗑️</button>
+        </div>
+      </div>`;
+    });
+    html+=`</div>`;
+  });
+  container.innerHTML=html;
+}
+function prevWeek(){ currentWeekOffset--; renderEntries(); }
+function nextWeek(){ currentWeekOffset++; renderEntries(); }
 
-  clearInterval(timerInterval);
+// ─── MONTHLY OVERVIEW ────────────────────────────────────────────────────────
+function renderOverview() {
+  const {hourlyRate}=loadSettings(), entries=loadEntries(), hist=loadHistorical();
+  const liveByMonth={};
+  entries.forEach(e=>{ const ym=e.date.slice(0,7); if(!liveByMonth[ym])liveByMonth[ym]={mins:0}; liveByMonth[ym].mins+=Math.round(entryDurMs(e)/60000); });
+  const allYMs=new Set([...hist.map(h=>h.ym),...Object.keys(liveByMonth)]);
+  const sorted=[...allYMs].sort();
+  const now=new Date();
+  for(let i=1;i<=3;i++){ const d=new Date(now.getFullYear(),now.getMonth()+i,1); const ym=toDateStr(d).slice(0,7); if(!allYMs.has(ym))sorted.push(ym); }
+  sorted.sort();
+  const currentYM=toDateStr(new Date()).slice(0,7);
+  let totalEarnings=0, totalOT=0;
+  let rows='';
+  sorted.forEach(ym=>{
+    const h=hist.find(x=>x.ym===ym), live=liveByMonth[ym];
+    const isFuture=ym>currentYM, isCurrent=ym===currentYM;
+    let hoursStr,otMins,targetMins,earningEuros,note='';
+    if(h&&!isCurrent){
+      const totalMins=parseHM(h.hours); otMins=parseHM(h.overtime); targetMins=parseHM(h.targetHours||'0');
+      earningEuros=(totalMins/60)*hourlyRate; hoursStr=h.hours; note=h.note||'';
+    } else if(!isFuture){
+      const mins=live?.mins||0; targetMins=getMonthlyTargetMins(ym); otMins=mins-targetMins;
+      earningEuros=(mins/60)*hourlyRate; hoursStr=fmtMinutes(mins); note=h?.note||'';
+    } else { targetMins=getMonthlyTargetMins(ym); hoursStr='—'; otMins=0; earningEuros=0; }
+    if(!isFuture){ totalEarnings+=earningEuros; totalOT+=otMins; }
+    const [y,m]=ym.split('-');
+    const monthLabel=`${MONTH_NAMES[parseInt(m)-1]}-${y.slice(2)}`;
+    const monthClass=isCurrent?'current':isFuture?'future':'';
+    const otClass=otMins>0?'ot-positive':otMins<0?'ot-negative':'';
+    rows+=`<tr>
+      <td><span class="month-cell ${monthClass}">${monthLabel}${isCurrent?' ●':''}</span></td>
+      <td>${hoursStr}</td><td class="money-cell">${isFuture?'—':formatEuro(earningEuros)}</td>
+      <td class="${otClass}">${isFuture?'—':(otMins>=0?'+':'')+fmtMinutes(otMins)}</td>
+      <td style="color:var(--gray-500)">${fmtMinutes(targetMins)}</td>
+      <td style="color:var(--gray-400);font-size:12px;">${note}</td>
+    </tr>`;
+  });
+  document.getElementById('overviewBody').innerHTML=rows;
+  const totalOTEl=document.getElementById('ovTotalOT');
+  totalOTEl.textContent=(totalOT>=0?'+':'')+fmtMinutes(totalOT);
+  totalOTEl.className='stat-value '+(totalOT>0?'positive':totalOT<0?'negative':'');
+  document.getElementById('ovTotalEarnings').textContent=formatEuro(totalEarnings);
+  const histOT=hist.reduce((s,h)=>s+parseHM(h.overtime),0);
+  const otExclEl=document.getElementById('ovTotalOTExcl');
+  otExclEl.textContent=(histOT>=0?'+':'')+fmtMinutes(histOT);
+  otExclEl.className='stat-value '+(histOT>0?'positive':histOT<0?'negative':'');
+}
 
-  const activity = document.getElementById('activityInput').value;
+// ─── SETTINGS ────────────────────────────────────────────────────────────────
+async function saveSettings() {
+  await withSync(async () => {
+    const rate=parseFloat(document.getElementById('setHourlyRate').value);
+    const weekly=parseFloat(document.getElementById('setWeeklyHours').value);
+    const {error}=await sb.from('ze_settings').upsert({user_id:getDeviceId(),hourly_rate:rate,weekly_hours:weekly,updated_at:new Date().toISOString()});
+    if(error) throw error;
+    _cache.settings={hourlyRate:rate,weeklyHours:weekly};
+  });
+  renderStats(); renderEntries();
+}
 
-  const start = new Date(timerStart);
-  const end = new Date(start.getTime() + (endTime - timerStart));
+function renderHistoricalForm() {
+  const hist=_histDraft||loadHistorical(), container=document.getElementById('historicalEntries');
+  if(!hist.length){ container.innerHTML=''; return; }
+  let html=`<table class="import-table"><tr>
+    <th>Monat (YYYY-MM)</th><th>Stunden</th><th>Überstunden</th><th>Sollstunden</th><th>Notiz</th><th></th></tr>`;
+  hist.forEach((h,i)=>{
+    html+=`<tr>
+      <td><input style="width:100px;border:1px solid #e5e7eb;border-radius:4px;padding:4px 6px;font-size:12px;" value="${h.ym}" onchange="updateHist(${i},'ym',this.value)"></td>
+      <td><input style="width:70px;border:1px solid #e5e7eb;border-radius:4px;padding:4px 6px;font-size:12px;" value="${h.hours}" onchange="updateHist(${i},'hours',this.value)"></td>
+      <td><input style="width:70px;border:1px solid #e5e7eb;border-radius:4px;padding:4px 6px;font-size:12px;" value="${h.overtime}" onchange="updateHist(${i},'overtime',this.value)"></td>
+      <td><input style="width:70px;border:1px solid #e5e7eb;border-radius:4px;padding:4px 6px;font-size:12px;" value="${h.targetHours||''}" onchange="updateHist(${i},'targetHours',this.value)"></td>
+      <td><input style="width:130px;border:1px solid #e5e7eb;border-radius:4px;padding:4px 6px;font-size:12px;" value="${h.note||''}" onchange="updateHist(${i},'note',this.value)"></td>
+      <td><button onclick="removeHist(${i})" style="background:none;border:none;cursor:pointer;color:#EF4444;font-size:16px;">×</button></td>
+    </tr>`;
+  });
+  container.innerHTML=html+'</table>';
+}
 
-  const entry = {
-    id: crypto.randomUUID(),
-    date: toDateStr(start),
-    start: toTimeStr(start),
-    end: toTimeStr(end),
-    activity
+let _histDraft=null;
+function updateHist(i,key,val){ if(!_histDraft)_histDraft=[...loadHistorical()]; _histDraft[i][key]=val; }
+async function removeHist(i){
+  const hist=[...((_histDraft)||loadHistorical())]; hist.splice(i,1); _histDraft=null;
+  await withSync(()=>_syncHistorical(hist)); renderHistoricalForm();
+}
+function addHistoricalRow(){
+  const hist=_histDraft||[...loadHistorical()];
+  hist.push({ym:'',hours:'00:00',overtime:'00:00',targetHours:'64:57',note:''});
+  _histDraft=hist; renderHistoricalForm();
+}
+async function saveHistorical(){
+  const hist=_histDraft||loadHistorical();
+  await withSync(()=>_syncHistorical(hist));
+  _histDraft=null; renderStats(); renderHistoricalForm();
+}
+async function _syncHistorical(hist){
+  const did=getDeviceId(); _cache.historical=hist;
+  await sb.from('ze_historical').delete().eq('user_id',did);
+  if(hist.length>0){
+    const {error}=await sb.from('ze_historical').insert(hist.map(h=>({
+      user_id:did,year_month:h.ym,hours:h.hours,overtime:h.overtime,
+      target_hours:h.targetHours||'64:57',note:h.note||''
+    })));
+    if(error) throw error;
+  }
+}
+
+// ─── MODAL ────────────────────────────────────────────────────────────────────
+function openAddModal(){
+  document.getElementById('modalTitle').textContent='Eintrag hinzufügen';
+  document.getElementById('editId').value='';
+  document.getElementById('editDate').value=toDateStr(new Date());
+  document.getElementById('editStart').value='09:00';
+  document.getElementById('editEnd').value='12:00';
+  document.getElementById('editActivity').value='';
+  document.getElementById('modalOverlay').style.display='flex';
+}
+function openEditModal(id){
+  const e=loadEntries().find(x=>x.id===id); if(!e) return;
+  document.getElementById('modalTitle').textContent='Eintrag bearbeiten';
+  document.getElementById('editId').value=id;
+  document.getElementById('editDate').value=e.date;
+  document.getElementById('editStart').value=e.start;
+  document.getElementById('editEnd').value=e.end;
+  document.getElementById('editActivity').value=e.activity||'';
+  document.getElementById('modalOverlay').style.display='flex';
+}
+function closeModal(ev){ if(!ev||ev.target===document.getElementById('modalOverlay')) document.getElementById('modalOverlay').style.display='none'; }
+
+async function saveEntry(){
+  const id=document.getElementById('editId').value;
+  const date=document.getElementById('editDate').value;
+  const start=document.getElementById('editStart').value;
+  const end=document.getElementById('editEnd').value;
+  const activity=document.getElementById('editActivity').value.trim();
+  if(!date||!start||!end){alert('Bitte alle Felder ausfüllen.');return;}
+  if(start>=end){alert('Endzeit muss nach Startzeit liegen.');return;}
+  await withSync(async ()=>{
+    if(id){
+      const {error}=await sb.from('ze_entries').update({date,start_time:start+':00',end_time:end+':00',activity}).eq('id',id).eq('user_id',getDeviceId());
+      if(error) throw error;
+      _cache.entries=_cache.entries.map(e=>e.id===id?{...e,date,start,end,activity}:e);
+    } else {
+      const newId=crypto.randomUUID();
+      const {error}=await sb.from('ze_entries').insert({id:newId,user_id:getDeviceId(),date,start_time:start+':00',end_time:end+':00',activity});
+      if(error) throw error;
+      _cache.entries.push({id:newId,date,start,end,activity});
+    }
+  });
+  closeModal(); renderStats(); renderEntries();
+}
+
+async function deleteEntry(id){
+  if(!confirm('Eintrag löschen?')) return;
+  await withSync(async ()=>{
+    const {error}=await sb.from('ze_entries').delete().eq('id',id).eq('user_id',getDeviceId());
+    if(error) throw error;
+    _cache.entries=_cache.entries.filter(e=>e.id!==id);
+  });
+  renderStats(); renderEntries();
+}
+
+// ─── DATA EXPORT/IMPORT ───────────────────────────────────────────────────────
+function exportData(){
+  const data={entries:loadEntries(),historical:loadHistorical(),settings:loadSettings()};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='zeiterfassung-export.json'; a.click();
+}
+async function importData(input){
+  const file=input.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=async e=>{
+    try{
+      const data=JSON.parse(e.target.result), did=getDeviceId();
+      await withSync(async ()=>{
+        if(data.entries){
+          await sb.from('ze_entries').delete().eq('user_id',did);
+          if(data.entries.length>0){
+            await sb.from('ze_entries').insert(data.entries.map(e=>({id:e.id||crypto.randomUUID(),user_id:did,date:e.date,start_time:e.start+':00',end_time:e.end+':00',activity:e.activity||''})));
+          }
+          _cache.entries=data.entries;
+        }
+        if(data.historical) await _syncHistorical(data.historical);
+        if(data.settings){
+          await sb.from('ze_settings').upsert({user_id:did,hourly_rate:data.settings.hourlyRate,weekly_hours:data.settings.weeklyHours});
+          _cache.settings=data.settings;
+        }
+      });
+      renderStats(); renderEntries(); renderHistoricalForm();
+    }catch(err){ setSyncStatus('error'); alert('Ungültige JSON-Datei.'); }
   };
-
-  console.log("Saved entry:", entry);
-
-  timerStart = null;
-  totalPausedMs = 0;
-  isPaused = false;
-
-  document.getElementById('clockDisplay').textContent = "00:00:00";
-
-  document.getElementById('trackerBtn').innerHTML = `
-    <button class="btn btn-primary" onclick="startTimer()">▶ Starten</button>
-  `;
+  reader.readAsText(file);
+}
+async function clearAll(){
+  if(!confirm('Wirklich ALLE Daten löschen?')) return;
+  const did=getDeviceId();
+  await withSync(async ()=>{
+    await Promise.all([
+      sb.from('ze_entries').delete().eq('user_id',did),
+      sb.from('ze_historical').delete().eq('user_id',did),
+      sb.from('ze_settings').delete().eq('user_id',did)
+    ]);
+  });
+  localStorage.removeItem('ze_device_id'); localStorage.removeItem('ze_running');
+  location.reload();
 }
 
-/* ===================== EXCEL EXPORT ===================== */
-function exportExcel(){
-  const entries = window.entries || [];
+// ─── TOAST ───────────────────────────────────────────────────────────────────
+function showToast(msg){
+  const t=document.createElement('div');
+  t.style.cssText=`position:fixed;bottom:24px;right:24px;background:#1f2937;color:white;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:999;animation:su .2s ease`;
+  t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2500);
+}
+const st=document.createElement('style');
+st.textContent=`@keyframes su{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}`;
+document.head.appendChild(st);
 
-  const data = entries.map(e=>({
-    Datum: e.date,
-    Start: e.start,
-    Ende: e.end,
-    Tätigkeit: e.activity || "",
-    Dauer_Minuten: calcMinutes(e)
-  }));
+// ─── KEYBOARD ────────────────────────────────────────────────────────────────
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space'&&document.activeElement.tagName!=='INPUT'){
+    e.preventDefault(); if(timerStart) stopTimer(); else startTimer();
+  }
+});
 
-  const ws = XLSX.utils.json_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Zeiterfassung");
-
-  XLSX.writeFile(wb, "zeiterfassung.xlsx");
+// ─── INIT ────────────────────────────────────────────────────────────────────
+async function continueInit() {
+  try {
+    await fetchAll();
+    document.getElementById('setHourlyRate').value = _cache.settings.hourlyRate;
+    document.getElementById('setWeeklyHours').value = _cache.settings.weeklyHours;
+    document.getElementById('currentCodeDisplay').textContent = getDeviceId() || '–';
+    renderStats(); renderEntries(); resumeTimer();
+  } catch(err) {
+    console.error(err);
+    setSyncStatus('error');
+  } finally {
+    document.getElementById('loadingOverlay').style.display='none';
+  }
 }
 
-function calcMinutes(e){
-  const [sh,sm]=e.start.split(':').map(Number);
-  const [eh,em]=e.end.split(':').map(Number);
-  return (eh*60+em)-(sh*60+sm);
+async function init() {
+  const did = getDeviceId();
+  if (!did) {
+    // New device: show code modal
+    document.getElementById('loadingOverlay').style.display='none';
+    document.getElementById('codeModal').style.display='flex';
+    return;
+  }
+  await continueInit();
 }
 
+init();
 </script>
-
 </body>
 </html>
