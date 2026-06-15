@@ -411,7 +411,7 @@ main { max-width:960px; margin:0 auto; padding:24px 16px; }
         </div>
         <div class="sprint-column">
           <div class="sprint-column-header col-hd-review">
-            <span>👀 Beim Chef</span>
+            <span>👀 In Review</span>
             <span class="sprint-col-count" id="colCountReview">0</span>
           </div>
           <div class="sprint-column-body" id="colReview"></div>
@@ -1220,13 +1220,8 @@ async function createSprint() {
   const did = getDeviceId();
 
   await withSync(async () => {
-    // End current active sprint
+    // End current active sprint and transfer open todos
     const active = _cache.sprints.find(s => !s.ended_at);
-    if (active) {
-      const { error } = await sb.from('ze_sprints').update({ ended_at: now }).eq('id', active.id);
-      if (error) throw error;
-      active.ended_at = now;
-    }
     const newId = crypto.randomUUID();
     const { error } = await sb.from('ze_sprints').insert({
       id: newId, user_id: did, title, notes, started_at: now
@@ -1234,6 +1229,25 @@ async function createSprint() {
     if (error) throw error;
     _cache.sprints.unshift({ id: newId, user_id: did, title, notes, started_at: now, ended_at: null });
     _selectedSprintId = newId;
+
+    if (active) {
+      // Transfer unfinished todos (todo + review) to new sprint
+      const openTodos = _cache.sprintTodos.filter(t => t.sprint_id === active.id && t.status !== 'done');
+      if (openTodos.length > 0) {
+        const { error: tErr } = await sb.from('ze_sprint_todos')
+          .update({ sprint_id: newId })
+          .in('id', openTodos.map(t => t.id));
+        if (tErr) throw tErr;
+        openTodos.forEach(t => { t.sprint_id = newId; });
+      }
+      // End the sprint
+      const { error: eErr } = await sb.from('ze_sprints').update({ ended_at: now }).eq('id', active.id);
+      if (eErr) throw eErr;
+      active.ended_at = now;
+
+      if (openTodos.length > 0)
+        showToast(`${openTodos.length} offene Todo${openTodos.length>1?'s':''} übertragen ✓`);
+    }
   });
 
   document.getElementById('newSprintModal').style.display = 'none';
@@ -1254,6 +1268,26 @@ async function endSprint(id) {
   });
   renderSprints();
   renderSprintBoard(id);
+}
+
+async function deleteSprint(id) {
+  const sprint = _cache.sprints.find(s => s.id === id);
+  const todoCount = _cache.sprintTodos.filter(t => t.sprint_id === id).length;
+  const msg = todoCount > 0
+    ? `Sprint "${sprint?.title}" und ${todoCount} Todo${todoCount>1?'s':''} löschen?`
+    : `Sprint "${sprint?.title}" löschen?`;
+  if (!confirm(msg)) return;
+  await withSync(async () => {
+    const { error } = await sb.from('ze_sprints').delete().eq('id', id);
+    if (error) throw error;
+    _cache.sprints = _cache.sprints.filter(s => s.id !== id);
+    _cache.sprintTodos = _cache.sprintTodos.filter(t => t.sprint_id !== id);
+  });
+  if (_selectedSprintId === id) _selectedSprintId = null;
+  renderSprints();
+  renderSprintBoard(_selectedSprintId);
+  renderSprintKPIs();
+  showToast('Sprint gelöscht');
 }
 
 function selectSprint(id) {
@@ -1381,7 +1415,10 @@ function renderSprintBoard(sprintId) {
         </div>
         ${sprint.notes?`<div style="font-size:12px;color:var(--gray-500);margin-top:4px;">${escapeHtml(sprint.notes)}</div>`:''}
       </div>
-      ${isActive?`<button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="endSprint('${sprint.id}')">Sprint beenden</button>`:''}
+      <div style="display:flex;gap:8px;">
+        ${isActive?`<button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="endSprint('${sprint.id}')">Sprint beenden</button>`:''}
+        <button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="deleteSprint('${sprint.id}')">🗑 Löschen</button>
+      </div>
     </div>
   </div>`;
 
@@ -1409,7 +1446,7 @@ function renderSprintBoard(sprintId) {
         <div class="todo-item-text">${escapeHtml(t.text)}</div>
         <div class="todo-item-actions">
           <button class="todo-act ta-back" onclick="moveTodo('${t.id}','todo')">← Zurück</button>
-          <button class="todo-act ta-done" onclick="moveTodo('${t.id}','done')">✅ Chef hat abgenommen</button>
+          <button class="todo-act ta-done" onclick="moveTodo('${t.id}','done')">✅ Abgenommen</button>
         </div>
       </div>`).join('')
     : '<div class="col-empty">Nichts wartet auf Review</div>';
