@@ -665,13 +665,15 @@ function renderEntries() {
   let html='';
   weekDates.forEach(dateStr=>{
     const d=new Date(dateStr+'T00:00');
-    if(d.getDay()===0) return; // Sonntage überspringen
-    const dayEntries=byDay[dateStr]; if(!dayEntries.length) return;
+    const isSunday=d.getDay()===0;
+    const dayEntries=byDay[dateStr]; if(!dayEntries.length) return; // leere Tage (inkl. leere Sonntage) überspringen
     dayEntries.sort((a,b)=>a.start.localeCompare(b.start));
     const dayMins=dayEntries.reduce((s,e)=>s+Math.round(entryDurMs(e)/60000),0);
     const diff=dayMins-dailyTargetMins;
     const isToday=dateStr===toDateStr(new Date());
-    const badge=diff>60?`<span class="target-indicator target-over">+${fmtMinutes(diff)}</span>`
+    // Sonntage zeigen, aber kein Überstunden-Badge (kein Arbeitssoll)
+    const badge=isSunday?''
+               :diff>60?`<span class="target-indicator target-over">+${fmtMinutes(diff)}</span>`
                :diff<-60?`<span class="target-indicator target-under">${fmtMinutes(diff)}</span>`
                :`<span class="target-indicator target-ok">✓</span>`;
     html+=`<div class="day-group"><div class="day-header">
