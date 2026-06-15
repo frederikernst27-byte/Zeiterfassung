@@ -1105,8 +1105,9 @@ function exportData(){
 }
 
 function exportExcel(){
-  const entries=loadEntries(), settings=loadSettings();
+  const entries=loadEntries(), settings=loadSettings(), hist=loadHistorical();
   const sorted=[...entries].sort((a,b)=>a.date.localeCompare(b.date)||a.start.localeCompare(b.start));
+  const currentYM=toDateStr(new Date()).slice(0,7);
 
   const rows=sorted.map(e=>{
     const d=new Date(e.date+'T00:00');
@@ -1123,35 +1124,53 @@ function exportExcel(){
     };
   });
 
-  // Monthly summary sheet
-  const byMonth={};
+  // Monthly summary: combine historical + live entries (same logic as renderOverview)
+  const liveByMonth={};
   sorted.forEach(e=>{
     const ym=e.date.slice(0,7);
-    if(!byMonth[ym]) byMonth[ym]={month:ym,mins:0,earnings:0,count:0};
-    const durMins=Math.round(entryDurMs(e)/60000);
-    byMonth[ym].mins+=durMins;
-    byMonth[ym].earnings+=(durMins/60)*settings.hourlyRate;
-    byMonth[ym].count++;
+    if(!liveByMonth[ym]) liveByMonth[ym]={mins:0,count:0};
+    liveByMonth[ym].mins+=Math.round(entryDurMs(e)/60000);
+    liveByMonth[ym].count++;
   });
-  const monthRows=Object.values(byMonth).map(m=>{
-    const [y,mo]=m.month.split('-');
+  const allYMs=new Set([...hist.map(h=>h.ym),...Object.keys(liveByMonth)]);
+  const sortedYMs=[...allYMs].sort();
+
+  const monthRows=sortedYMs.map(ym=>{
+    const h=hist.find(x=>x.ym===ym), live=liveByMonth[ym];
+    const isCurrent=ym===currentYM;
+    const [y,mo]=ym.split('-');
+    let hoursStr,mins,otMins,targetMins,earnings,note='';
+    if(h&&!isCurrent){
+      mins=parseHM(h.hours)*60000/60000; // in minutes already
+      const totalMins=parseHM(h.hours);
+      targetMins=parseHM(h.targetHours||'0');
+      otMins=parseHM(h.overtime);
+      earnings=(totalMins/60)*settings.hourlyRate;
+      mins=totalMins;
+      note=h.note||'';
+    } else {
+      mins=live?.mins||0;
+      targetMins=getMonthlyTargetMins(ym);
+      otMins=mins-targetMins;
+      earnings=(mins/60)*settings.hourlyRate;
+    }
     return {
       'Monat': `${MONTH_NAMES[parseInt(mo)-1]} ${y}`,
-      'Arbeitsstunden': parseFloat((m.mins/60).toFixed(2)),
-      'Verdienst (€)': parseFloat(m.earnings.toFixed(2)),
-      'Einträge': m.count,
-      'Sollstunden': parseFloat((getMonthlyTargetMins(m.month)/60).toFixed(2)),
-      'Überstunden': parseFloat(((m.mins-getMonthlyTargetMins(m.month))/60).toFixed(2))
+      'Arbeitsstunden': parseFloat((mins/60).toFixed(2)),
+      'Verdienst (€)': parseFloat(earnings.toFixed(2)),
+      'Einträge': live?.count||0,
+      'Sollstunden': parseFloat((targetMins/60).toFixed(2)),
+      'Überstunden': parseFloat((otMins/60).toFixed(2)),
+      'Notiz': note
     };
   });
 
   const wb=XLSX.utils.book_new();
-  const wsEntries=XLSX.utils.json_to_sheet(rows);
-  const wsMonths=XLSX.utils.json_to_sheet(monthRows);
+  const wsEntries=XLSX.utils.json_to_sheet(rows.length?rows:[{'Hinweis':'Keine Einträge vorhanden'}]);
+  const wsMonths=XLSX.utils.json_to_sheet(monthRows.length?monthRows:[{'Hinweis':'Keine Monate vorhanden'}]);
 
-  // Column widths for entries sheet
   wsEntries['!cols']=[{wch:12},{wch:12},{wch:8},{wch:8},{wch:30},{wch:13},{wch:13}];
-  wsMonths['!cols']=[{wch:14},{wch:16},{wch:14},{wch:10},{wch:14},{wch:13}];
+  wsMonths['!cols']=[{wch:14},{wch:14},{wch:13},{wch:9},{wch:13},{wch:13},{wch:20}];
 
   XLSX.utils.book_append_sheet(wb,wsEntries,'Einträge');
   XLSX.utils.book_append_sheet(wb,wsMonths,'Monatsübersicht');
