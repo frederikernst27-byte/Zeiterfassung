@@ -478,16 +478,16 @@ function startFresh() {
   const newId = crypto.randomUUID();
   setDeviceId(newId);
   document.getElementById('codeModal').style.display = 'none';
-  continueInit(true);
+  continueInit();
 }
 
 async function applyCode() {
   const code = document.getElementById('codeInput').value.trim();
   if (!code) { showToast('Bitte Code eingeben'); return; }
-  setDeviceId(code);
+  setDeviceId(code.toLowerCase().trim());
   document.getElementById('codeModal').style.display = 'none';
   document.getElementById('loadingOverlay').style.display = 'flex';
-  await continueInit(false);
+  await continueInit();
 }
 
 async function switchCode() {
@@ -758,7 +758,7 @@ async function saveSettings() {
 }
 
 function renderHistoricalForm() {
-  const hist=loadHistorical(), container=document.getElementById('historicalEntries');
+  const hist=_histDraft||loadHistorical(), container=document.getElementById('historicalEntries');
   if(!hist.length){ container.innerHTML=''; return; }
   let html=`<table class="import-table"><tr>
     <th>Monat (YYYY-MM)</th><th>Stunden</th><th>Überstunden</th><th>Sollstunden</th><th>Notiz</th><th></th></tr>`;
@@ -789,7 +789,7 @@ function addHistoricalRow(){
 async function saveHistorical(){
   const hist=_histDraft||loadHistorical();
   await withSync(()=>_syncHistorical(hist));
-  _histDraft=null; renderStats();
+  _histDraft=null; renderStats(); renderHistoricalForm();
 }
 async function _syncHistorical(hist){
   const did=getDeviceId(); _cache.historical=hist;
@@ -921,25 +921,9 @@ document.addEventListener('keydown',e=>{
 });
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
-async function continueInit(isNew) {
+async function continueInit() {
   try {
     await fetchAll();
-    // Seed historical if new account with no data
-    if (isNew || _cache.historical.length === 0) {
-      const seed = [
-        {ym:'2025-09',hours:'16:12',overtime:'-05:27',note:'Ab 15.09 angefangen',targetHours:'21:39'},
-        {ym:'2025-10',hours:'42:07',overtime:'-01:11',note:'',targetHours:'43:18'},
-        {ym:'2025-11',hours:'54:31',overtime:'11:13', note:'',targetHours:'43:18'},
-        {ym:'2025-12',hours:'41:47',overtime:'-01:31',note:'',targetHours:'43:18'},
-        {ym:'2026-01',hours:'30:38',overtime:'-12:40',note:'',targetHours:'43:18'},
-        {ym:'2026-02',hours:'21:09',overtime:'-32:58',note:'Ab 15.02 15h/Woche',targetHours:'54:07'},
-        {ym:'2026-03',hours:'77:03',overtime:'12:06', note:'',targetHours:'64:57'},
-        {ym:'2026-04',hours:'71:12',overtime:'06:15', note:'',targetHours:'64:57'},
-        {ym:'2026-05',hours:'52:56',overtime:'-12:01',note:'',targetHours:'64:57'},
-        {ym:'2026-06',hours:'08:39',overtime:'-56:18',note:'',targetHours:'64:57'},
-      ];
-      if (_cache.historical.length === 0) await _syncHistorical(seed);
-    }
     document.getElementById('setHourlyRate').value = _cache.settings.hourlyRate;
     document.getElementById('setWeeklyHours').value = _cache.settings.weeklyHours;
     document.getElementById('currentCodeDisplay').textContent = getDeviceId() || '–';
@@ -960,7 +944,7 @@ async function init() {
     document.getElementById('codeModal').style.display='flex';
     return;
   }
-  await continueInit(false);
+  await continueInit();
 }
 
 init();
