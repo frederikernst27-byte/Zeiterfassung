@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Zeiterfassung</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -79,6 +80,10 @@ main { max-width:960px; margin:0 auto; padding:24px 16px; }
 .btn-ghost { background:none; border:1px solid var(--gray-200); color:var(--gray-700); }
 .btn-ghost:hover { background:var(--gray-100); }
 .btn-sm { padding:6px 14px; font-size:13px; }
+.btn-warning { background:var(--warning); color:white; }
+.btn-warning:hover { background:#D97706; transform:translateY(-1px); }
+.status-badge.paused { background:var(--warning-light); color:var(--warning); }
+.pause-info { font-size:12px; color:var(--warning); font-weight:500; margin-top:4px; }
 
 /* STATS */
 .stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
@@ -238,6 +243,7 @@ main { max-width:960px; margin:0 auto; padding:24px 16px; }
           <span class="status-badge" id="statusBadge">
             <span class="status-dot"></span> Nicht gestartet
           </span>
+          <div class="pause-info" id="pauseInfo" style="display:none;"></div>
         </div>
       </div>
       <div id="trackerBtn">
@@ -345,6 +351,7 @@ main { max-width:960px; margin:0 auto; padding:24px 16px; }
     <h3 style="font-size:15px;font-weight:700;margin-bottom:12px;">Daten</h3>
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       <button class="btn btn-ghost btn-sm" onclick="exportData()">📥 Export (JSON)</button>
+      <button class="btn btn-ghost btn-sm" onclick="exportExcel()">📊 Export (Excel)</button>
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importFile').click()">📤 Import (JSON)</button>
       <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(this)">
       <button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="clearAll()">🗑 Alle Daten löschen</button>
@@ -374,6 +381,11 @@ main { max-width:960px; margin:0 auto; padding:24px 16px; }
     <div class="form-group">
       <label class="form-label">Tätigkeit</label>
       <input type="text" class="form-input" id="editActivity" placeholder="Woran hast du gearbeitet?">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Pause (Minuten)</label>
+      <input type="number" class="form-input" id="editPause" value="0" min="0" max="480" step="5">
+      <div class="settings-hint">Pausenzeit wird von der Gesamtdauer abgezogen</div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
@@ -557,27 +569,81 @@ function showPage(name) {
 
 // ─── TIMER ────────────────────────────────────────────────────────────────────
 let timerInterval=null, timerStart=null, currentWeekOffset=0;
+let timerPaused=false, pauseStart=null, totalPausedMs=0;
+
+function _runningButtons() {
+  return `<div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <button class="btn btn-warning" onclick="pauseTimer()" style="padding:14px 28px;font-size:15px;">⏸ Pause</button>
+    <button class="btn btn-stop" onclick="stopTimer()" style="padding:14px 28px;font-size:15px;">⏹ Stoppen</button>
+  </div>`;
+}
+function _pausedButtons() {
+  return `<div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <button class="btn btn-primary" onclick="resumeTimerFromPause()" style="padding:14px 28px;font-size:15px;">▶ Weiter</button>
+    <button class="btn btn-stop" onclick="stopTimer()" style="padding:14px 28px;font-size:15px;">⏹ Stoppen</button>
+  </div>`;
+}
 
 function startTimer() {
-  timerStart=Date.now();
+  timerStart=Date.now(); timerPaused=false; pauseStart=null; totalPausedMs=0;
   localStorage.setItem('ze_running',timerStart);
   document.getElementById('trackerActivity').style.display='flex';
   document.getElementById('activityInput').focus();
-  document.getElementById('trackerBtn').innerHTML=
-    `<button class="btn btn-stop" onclick="stopTimer()" style="padding:14px 28px;font-size:15px;">⏹ Stoppen</button>`;
+  document.getElementById('trackerBtn').innerHTML=_runningButtons();
+  document.getElementById('pauseInfo').style.display='none';
   const b=document.getElementById('statusBadge');
   b.className='status-badge running';
   b.innerHTML=`<span class="status-dot"></span> Läuft`;
   document.getElementById('clockDisplay').classList.add('running');
-  timerInterval=setInterval(()=>{ document.getElementById('clockDisplay').textContent=fmtMs(Date.now()-timerStart); },1000);
+  timerInterval=setInterval(()=>{
+    const worked=Date.now()-timerStart-totalPausedMs;
+    document.getElementById('clockDisplay').textContent=fmtMs(worked);
+  },1000);
+}
+
+function pauseTimer() {
+  if(!timerStart||timerPaused) return;
+  timerPaused=true; pauseStart=Date.now();
+  clearInterval(timerInterval); timerInterval=null;
+  document.getElementById('trackerBtn').innerHTML=_pausedButtons();
+  const b=document.getElementById('statusBadge');
+  b.className='status-badge paused';
+  b.innerHTML=`<span class="status-dot"></span> Pausiert`;
+  const pi=document.getElementById('pauseInfo');
+  pi.style.display='block';
+  pi.textContent='Pause läuft…';
+  const pauseTimer=setInterval(()=>{
+    if(!timerPaused){ clearInterval(pauseTimer); return; }
+    const curPause=totalPausedMs+(Date.now()-pauseStart);
+    pi.textContent=`Aktuelle Pause: ${fmtMs(curPause)}`;
+  },1000);
+}
+
+function resumeTimerFromPause() {
+  if(!timerStart||!timerPaused) return;
+  totalPausedMs+=Date.now()-pauseStart;
+  pauseStart=null; timerPaused=false;
+  const b=document.getElementById('statusBadge');
+  b.className='status-badge running';
+  b.innerHTML=`<span class="status-dot"></span> Läuft`;
+  const pi=document.getElementById('pauseInfo');
+  pi.textContent=`Pausiert: ${fmtMs(totalPausedMs)}`;
+  document.getElementById('trackerBtn').innerHTML=_runningButtons();
+  timerInterval=setInterval(()=>{
+    const worked=Date.now()-timerStart-totalPausedMs;
+    document.getElementById('clockDisplay').textContent=fmtMs(worked);
+  },1000);
 }
 
 async function stopTimer() {
   if(!timerStart) return;
   clearInterval(timerInterval); timerInterval=null;
-  const end=Date.now();
+  const now=Date.now();
+  const curPause=timerPaused&&pauseStart ? now-pauseStart : 0;
+  const netWorkedMs=now-timerStart-totalPausedMs-curPause;
   const activity=document.getElementById('activityInput').value.trim();
-  const s=new Date(timerStart), e=new Date(end);
+  const s=new Date(timerStart);
+  const e=new Date(timerStart+netWorkedMs);
   const entry={id:crypto.randomUUID(),date:toDateStr(s),start:toTimeStr(s),end:toTimeStr(e),activity};
 
   await withSync(async () => {
@@ -589,11 +655,13 @@ async function stopTimer() {
     _cache.entries.push(entry);
   });
 
-  timerStart=null; localStorage.removeItem('ze_running');
+  timerStart=null; timerPaused=false; pauseStart=null; totalPausedMs=0;
+  localStorage.removeItem('ze_running');
   document.getElementById('clockDisplay').textContent='00:00:00';
   document.getElementById('clockDisplay').classList.remove('running');
   document.getElementById('activityInput').value='';
   document.getElementById('trackerActivity').style.display='none';
+  document.getElementById('pauseInfo').style.display='none';
   document.getElementById('trackerBtn').innerHTML=
     `<button class="btn btn-primary" onclick="startTimer()" style="padding:14px 28px;font-size:15px;">▶ Starten</button>`;
   const b=document.getElementById('statusBadge');
@@ -603,14 +671,16 @@ async function stopTimer() {
 
 function resumeTimer() {
   const s=localStorage.getItem('ze_running'); if(!s) return;
-  timerStart=parseInt(s);
+  timerStart=parseInt(s); timerPaused=false; pauseStart=null; totalPausedMs=0;
   document.getElementById('trackerActivity').style.display='flex';
-  document.getElementById('trackerBtn').innerHTML=
-    `<button class="btn btn-stop" onclick="stopTimer()" style="padding:14px 28px;font-size:15px;">⏹ Stoppen</button>`;
+  document.getElementById('trackerBtn').innerHTML=_runningButtons();
   const b=document.getElementById('statusBadge');
   b.className='status-badge running'; b.innerHTML=`<span class="status-dot"></span> Läuft`;
   document.getElementById('clockDisplay').classList.add('running');
-  timerInterval=setInterval(()=>{ document.getElementById('clockDisplay').textContent=fmtMs(Date.now()-timerStart); },1000);
+  timerInterval=setInterval(()=>{
+    const worked=Date.now()-timerStart-totalPausedMs;
+    document.getElementById('clockDisplay').textContent=fmtMs(worked);
+  },1000);
 }
 
 // ─── STATS ────────────────────────────────────────────────────────────────────
@@ -813,6 +883,7 @@ function openAddModal(){
   document.getElementById('editStart').value='09:00';
   document.getElementById('editEnd').value='12:00';
   document.getElementById('editActivity').value='';
+  document.getElementById('editPause').value='0';
   document.getElementById('modalOverlay').style.display='flex';
 }
 function openEditModal(id){
@@ -823,6 +894,7 @@ function openEditModal(id){
   document.getElementById('editStart').value=e.start;
   document.getElementById('editEnd').value=e.end;
   document.getElementById('editActivity').value=e.activity||'';
+  document.getElementById('editPause').value='0';
   document.getElementById('modalOverlay').style.display='flex';
 }
 function closeModal(ev){ if(!ev||ev.target===document.getElementById('modalOverlay')) document.getElementById('modalOverlay').style.display='none'; }
@@ -831,10 +903,17 @@ async function saveEntry(){
   const id=document.getElementById('editId').value;
   const date=document.getElementById('editDate').value;
   const start=document.getElementById('editStart').value;
-  const end=document.getElementById('editEnd').value;
+  const rawEnd=document.getElementById('editEnd').value;
   const activity=document.getElementById('editActivity').value.trim();
-  if(!date||!start||!end){alert('Bitte alle Felder ausfüllen.');return;}
-  if(start>=end){alert('Endzeit muss nach Startzeit liegen.');return;}
+  const pauseMins=parseInt(document.getElementById('editPause').value)||0;
+  if(!date||!start||!rawEnd){alert('Bitte alle Felder ausfüllen.');return;}
+  if(start>=rawEnd){alert('Endzeit muss nach Startzeit liegen.');return;}
+  // Subtract pause minutes from end time
+  const [eh,em]=rawEnd.split(':').map(Number);
+  const adjEndTotal=eh*60+em-pauseMins;
+  if(adjEndTotal<0){alert('Pausenzeit überschreitet die Eintragszeit.');return;}
+  const end=`${String(Math.floor(adjEndTotal/60)).padStart(2,'0')}:${String(adjEndTotal%60).padStart(2,'0')}`;
+  if(start>=end){alert('Nach Abzug der Pause ist die Dauer 0 oder negativ.');return;}
   await withSync(async ()=>{
     if(id){
       const {error}=await sb.from('ze_entries').update({date,start_time:start+':00',end_time:end+':00',activity}).eq('id',id).eq('user_id',getDeviceId());
@@ -865,6 +944,61 @@ function exportData(){
   const data={entries:loadEntries(),historical:loadHistorical(),settings:loadSettings()};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='zeiterfassung-export.json'; a.click();
+}
+
+function exportExcel(){
+  const entries=loadEntries(), settings=loadSettings();
+  const sorted=[...entries].sort((a,b)=>a.date.localeCompare(b.date)||a.start.localeCompare(b.start));
+
+  const rows=sorted.map(e=>{
+    const d=new Date(e.date+'T00:00');
+    const durMins=Math.round(entryDurMs(e)/60000);
+    const durHours=parseFloat((durMins/60).toFixed(2));
+    return {
+      'Datum': e.date,
+      'Wochentag': DAY_FULL[d.getDay()],
+      'Start': e.start,
+      'Ende': e.end,
+      'Tätigkeit': e.activity||'',
+      'Dauer (Std.)': durHours,
+      'Verdienst (€)': parseFloat((durHours*settings.hourlyRate).toFixed(2))
+    };
+  });
+
+  // Monthly summary sheet
+  const byMonth={};
+  sorted.forEach(e=>{
+    const ym=e.date.slice(0,7);
+    if(!byMonth[ym]) byMonth[ym]={month:ym,mins:0,earnings:0,count:0};
+    const durMins=Math.round(entryDurMs(e)/60000);
+    byMonth[ym].mins+=durMins;
+    byMonth[ym].earnings+=(durMins/60)*settings.hourlyRate;
+    byMonth[ym].count++;
+  });
+  const monthRows=Object.values(byMonth).map(m=>{
+    const [y,mo]=m.month.split('-');
+    return {
+      'Monat': `${MONTH_NAMES[parseInt(mo)-1]} ${y}`,
+      'Arbeitsstunden': parseFloat((m.mins/60).toFixed(2)),
+      'Verdienst (€)': parseFloat(m.earnings.toFixed(2)),
+      'Einträge': m.count,
+      'Sollstunden': parseFloat((getMonthlyTargetMins(m.month)/60).toFixed(2)),
+      'Überstunden': parseFloat(((m.mins-getMonthlyTargetMins(m.month))/60).toFixed(2))
+    };
+  });
+
+  const wb=XLSX.utils.book_new();
+  const wsEntries=XLSX.utils.json_to_sheet(rows);
+  const wsMonths=XLSX.utils.json_to_sheet(monthRows);
+
+  // Column widths for entries sheet
+  wsEntries['!cols']=[{wch:12},{wch:12},{wch:8},{wch:8},{wch:30},{wch:13},{wch:13}];
+  wsMonths['!cols']=[{wch:14},{wch:16},{wch:14},{wch:10},{wch:14},{wch:13}];
+
+  XLSX.utils.book_append_sheet(wb,wsEntries,'Einträge');
+  XLSX.utils.book_append_sheet(wb,wsMonths,'Monatsübersicht');
+  XLSX.writeFile(wb,'zeiterfassung-export.xlsx');
+  showToast('Excel-Export erstellt ✓');
 }
 async function importData(input){
   const file=input.files[0]; if(!file) return;
