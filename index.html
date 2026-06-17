@@ -335,7 +335,7 @@ main { max-width:960px; margin:0 auto; padding:24px 16px; }
       </div>
     </div>
     <div class="tracker-activity" id="trackerActivity" style="display:none;">
-      <input type="text" class="activity-input" id="activityInput" placeholder="Woran arbeitest du?" maxlength="120">
+      <input type="text" class="activity-input" id="activityInput" placeholder="Woran arbeitest du?" maxlength="120" oninput="localStorage.setItem('ze_activity',this.value)">
     </div>
   </div>
 
@@ -836,15 +836,19 @@ async function startTimer() {
     const worked=Date.now()-timerStart-totalPausedMs;
     document.getElementById('clockDisplay').textContent=fmtMs(worked);
   },1000);
-  // Startzeit sofort in Supabase speichern
+  // Startzeit sofort in Supabase speichern (best-effort, Timer läuft unabhängig davon)
   const s=new Date(timerStart);
-  await withSync(async ()=>{
-    const {error}=await sb.from('ze_entries').insert({
-      id:runningId, user_id:getDeviceId(),
-      date:toDateStr(s), start_time:toTimeStr(s)+':00', end_time:null, activity:''
+  try {
+    await withSync(async ()=>{
+      const {error}=await sb.from('ze_entries').insert({
+        id:runningId, user_id:getDeviceId(),
+        date:toDateStr(s), start_time:toTimeStr(s)+':00', end_time:null, activity:''
+      });
+      if(error) throw error;
     });
-    if(error) throw error;
-  });
+  } catch(e) {
+    // Fehler beim Vorab-Speichern ignorieren; stopTimer speichert den vollständigen Eintrag
+  }
 }
 
 function pauseTimer() {
@@ -908,6 +912,7 @@ async function stopTimer() {
   localStorage.removeItem('ze_running');
   localStorage.removeItem('ze_running_id');
   localStorage.removeItem('ze_pause_state');
+  localStorage.removeItem('ze_activity');
   document.getElementById('clockDisplay').textContent='00:00:00';
   document.getElementById('clockDisplay').classList.remove('running');
   document.getElementById('activityInput').value='';
@@ -934,6 +939,7 @@ function resumeTimer() {
     } catch(e) {}
   }
   document.getElementById('trackerActivity').style.display='flex';
+  document.getElementById('activityInput').value=localStorage.getItem('ze_activity')||'';
   if(timerPaused) {
     document.getElementById('trackerBtn').innerHTML=_pausedButtons();
     const b=document.getElementById('statusBadge');
