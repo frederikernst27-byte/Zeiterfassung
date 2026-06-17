@@ -687,11 +687,19 @@ async function fetchAll() {
     sb.from('ze_sprint_todos').select('*').eq('user_id', did).order('sort_order').order('created_at')
   ]);
   if (eRes.data) {
-    _cache.entries = eRes.data.map(r => ({
+    const completedEntries = eRes.data.filter(r => r.end_time !== null);
+    _cache.entries = completedEntries.map(r => ({
       id: r.id, date: r.date,
       start: r.start_time.slice(0,5), end: r.end_time.slice(0,5),
       activity: r.activity || ''
     }));
+    // Cross-device restore: if Supabase has a running entry and localStorage doesn't
+    const runningEntry = eRes.data.find(r => r.end_time === null);
+    if (runningEntry && !localStorage.getItem('ze_running')) {
+      const startMs = new Date(`${runningEntry.date}T${runningEntry.start_time}`).getTime();
+      localStorage.setItem('ze_running', startMs);
+      localStorage.setItem('ze_running_id', runningEntry.id);
+    }
   }
   if (sRes.data) {
     _cache.settings = {
@@ -810,9 +818,12 @@ function _pausedButtons() {
   </div>`;
 }
 
-function startTimer() {
+async function startTimer() {
   timerStart=Date.now(); timerPaused=false; pauseStart=null; totalPausedMs=0;
+  const runningId=crypto.randomUUID();
   localStorage.setItem('ze_running',timerStart);
+  localStorage.setItem('ze_running_id',runningId);
+  localStorage.removeItem('ze_pause_state');
   document.getElementById('trackerActivity').style.display='flex';
   document.getElementById('activityInput').focus();
   document.getElementById('trackerBtn').innerHTML=_runningButtons();
@@ -825,11 +836,21 @@ function startTimer() {
     const worked=Date.now()-timerStart-totalPausedMs;
     document.getElementById('clockDisplay').textContent=fmtMs(worked);
   },1000);
+  // Startzeit sofort in Supabase speichern
+  const s=new Date(timerStart);
+  await withSync(async ()=>{
+    const {error}=await sb.from('ze_entries').insert({
+      id:runningId, user_id:getDeviceId(),
+      date:toDateStr(s), start_time:toTimeStr(s)+':00', end_time:null, activity:''
+    });
+    if(error) throw error;
+  });
 }
 
 function pauseTimer() {
   if(!timerStart||timerPaused) return;
   timerPaused=true; pauseStart=Date.now();
+  localStorage.setItem('ze_pause_state',JSON.stringify({pauseStart,totalPausedMs}));
   clearInterval(timerInterval); timerInterval=null;
   document.getElementById('trackerBtn').innerHTML=_pausedButtons();
   const b=document.getElementById('statusBadge');
@@ -849,6 +870,7 @@ function resumeTimerFromPause() {
   if(!timerStart||!timerPaused) return;
   totalPausedMs+=Date.now()-pauseStart;
   pauseStart=null; timerPaused=false;
+  localStorage.removeItem('ze_pause_state');
   const b=document.getElementById('statusBadge');
   b.className='status-badge running';
   b.innerHTML=`<span class="status-dot"></span> Läuft`;
@@ -870,10 +892,11 @@ async function stopTimer() {
   const activity=document.getElementById('activityInput').value.trim();
   const s=new Date(timerStart);
   const e=new Date(timerStart+netWorkedMs);
-  const entry={id:crypto.randomUUID(),date:toDateStr(s),start:toTimeStr(s),end:toTimeStr(e),activity};
+  const entryId=localStorage.getItem('ze_running_id')||crypto.randomUUID();
+  const entry={id:entryId,date:toDateStr(s),start:toTimeStr(s),end:toTimeStr(e),activity};
 
   await withSync(async () => {
-    const { error } = await sb.from('ze_entries').insert({
+    const { error } = await sb.from('ze_entries').upsert({
       id:entry.id, user_id:getDeviceId(),
       date:entry.date, start_time:entry.start+':00', end_time:entry.end+':00', activity:entry.activity
     });
@@ -883,6 +906,8 @@ async function stopTimer() {
 
   timerStart=null; timerPaused=false; pauseStart=null; totalPausedMs=0;
   localStorage.removeItem('ze_running');
+  localStorage.removeItem('ze_running_id');
+  localStorage.removeItem('ze_pause_state');
   document.getElementById('clockDisplay').textContent='00:00:00';
   document.getElementById('clockDisplay').classList.remove('running');
   document.getElementById('activityInput').value='';
@@ -898,15 +923,42 @@ async function stopTimer() {
 function resumeTimer() {
   const s=localStorage.getItem('ze_running'); if(!s) return;
   timerStart=parseInt(s); timerPaused=false; pauseStart=null; totalPausedMs=0;
+  // Pause-Zustand wiederherstellen
+  const pauseState=localStorage.getItem('ze_pause_state');
+  if(pauseState) {
+    try {
+      const ps=JSON.parse(pauseState);
+      totalPausedMs=ps.totalPausedMs||0;
+      pauseStart=ps.pauseStart||null;
+      timerPaused=true;
+    } catch(e) {}
+  }
   document.getElementById('trackerActivity').style.display='flex';
-  document.getElementById('trackerBtn').innerHTML=_runningButtons();
-  const b=document.getElementById('statusBadge');
-  b.className='status-badge running'; b.innerHTML=`<span class="status-dot"></span> Läuft`;
-  document.getElementById('clockDisplay').classList.add('running');
-  timerInterval=setInterval(()=>{
+  if(timerPaused) {
+    document.getElementById('trackerBtn').innerHTML=_pausedButtons();
+    const b=document.getElementById('statusBadge');
+    b.className='status-badge paused'; b.innerHTML=`<span class="status-dot"></span> Pausiert`;
+    document.getElementById('clockDisplay').classList.add('running');
     const worked=Date.now()-timerStart-totalPausedMs;
     document.getElementById('clockDisplay').textContent=fmtMs(worked);
-  },1000);
+    const pi=document.getElementById('pauseInfo');
+    pi.style.display='block';
+    const pauseInterval=setInterval(()=>{
+      if(!timerPaused){ clearInterval(pauseInterval); return; }
+      const curPause=totalPausedMs+(Date.now()-pauseStart);
+      pi.textContent=`Aktuelle Pause: ${fmtMs(curPause)}`;
+    },1000);
+    pi.textContent=`Aktuelle Pause: ${fmtMs(totalPausedMs+(Date.now()-pauseStart))}`;
+  } else {
+    document.getElementById('trackerBtn').innerHTML=_runningButtons();
+    const b=document.getElementById('statusBadge');
+    b.className='status-badge running'; b.innerHTML=`<span class="status-dot"></span> Läuft`;
+    document.getElementById('clockDisplay').classList.add('running');
+    timerInterval=setInterval(()=>{
+      const worked=Date.now()-timerStart-totalPausedMs;
+      document.getElementById('clockDisplay').textContent=fmtMs(worked);
+    },1000);
+  }
 }
 
 // ─── STATS ────────────────────────────────────────────────────────────────────
