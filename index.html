@@ -206,6 +206,38 @@ main { max-width:960px; margin:0 auto; padding:24px 16px; }
 .kpi-bar { background:var(--gray-200); border-radius:4px; height:6px; margin-top:6px; overflow:hidden; }
 .kpi-bar-fill { height:100%; border-radius:4px; background:var(--success); transition:width .4s; }
 
+/* CALENDAR */
+.calendar-weekdays { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; margin-bottom:6px; }
+.calendar-weekdays span { text-align:center; font-size:11px; font-weight:600; color:var(--gray-400); text-transform:uppercase; }
+.calendar-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+.calendar-day { aspect-ratio:1; border-radius:8px; background:var(--gray-50); padding:6px; display:flex; flex-direction:column; justify-content:space-between; cursor:pointer; transition:all .12s; border:1.5px solid transparent; }
+.calendar-day:hover { border-color:var(--primary); }
+.calendar-day.empty { background:none; cursor:default; }
+.calendar-day.empty:hover { border-color:transparent; }
+.calendar-day.today { border-color:var(--primary); }
+.calendar-day-num { font-size:12px; font-weight:600; color:var(--gray-700); }
+.calendar-day-hours { font-size:11px; font-weight:700; align-self:flex-end; }
+.calendar-day.cd-ok { background:var(--success-light); }
+.calendar-day.cd-ok .calendar-day-hours { color:var(--success); }
+.calendar-day.cd-over { background:var(--warning-light); }
+.calendar-day.cd-over .calendar-day-hours { color:var(--warning); }
+.calendar-day.cd-under { background:var(--danger-light); }
+.calendar-day.cd-under .calendar-day-hours { color:var(--danger); }
+
+/* HEATMAP */
+.heatmap-legend { display:flex; align-items:center; gap:4px; font-size:11px; color:var(--gray-400); }
+.heatmap-months { display:flex; font-size:11px; color:var(--gray-400); margin-bottom:4px; margin-left:30px; position:relative; height:14px; }
+.heatmap-row { display:flex; gap:3px; }
+.heatmap-weekday-labels { display:flex; flex-direction:column; gap:3px; margin-right:6px; justify-content:space-between; }
+.heatmap-weekday-labels span { font-size:10px; color:var(--gray-400); height:11px; line-height:11px; }
+.heatmap-week { display:flex; flex-direction:column; gap:3px; }
+.heatmap-cell { width:11px; height:11px; border-radius:3px; background:var(--gray-100); display:inline-block; }
+.heatmap-cell[data-level="0"] { background:var(--gray-100); }
+.heatmap-cell[data-level="1"] { background:#C6F0DD; }
+.heatmap-cell[data-level="2"] { background:#86DCB3; }
+.heatmap-cell[data-level="3"] { background:#3DBE82; }
+.heatmap-cell[data-level="4"] { background:var(--success); }
+
 @media(max-width:900px){ .sprint-layout{flex-direction:column;} .sprint-sidebar{width:100%;} }
 @media(max-width:700px){
   .stats-row{grid-template-columns:1fr 1fr;}
@@ -335,6 +367,37 @@ main { max-width:960px; margin:0 auto; padding:24px 16px; }
       <div class="stat-sub">kumuliert</div>
     </div>
   </div>
+  <!-- KALENDER -->
+  <div class="card" style="margin-bottom:16px;">
+    <div class="section-header" style="margin-bottom:16px;">
+      <span class="section-title">Kalender</span>
+      <div class="week-nav">
+        <button onclick="prevCalMonth()">‹</button>
+        <span class="week-label" id="calMonthLabel"></span>
+        <button onclick="nextCalMonth()">›</button>
+      </div>
+    </div>
+    <div class="calendar-weekdays" id="calWeekdays"></div>
+    <div class="calendar-grid" id="calendarGrid"></div>
+  </div>
+
+  <!-- HEATMAP -->
+  <div class="card" style="margin-bottom:16px;overflow-x:auto;">
+    <div class="section-header" style="margin-bottom:16px;">
+      <span class="section-title">Aktivität (letzte 12 Monate)</span>
+      <div class="heatmap-legend">
+        <span>weniger</span>
+        <span class="heatmap-cell" data-level="0"></span>
+        <span class="heatmap-cell" data-level="1"></span>
+        <span class="heatmap-cell" data-level="2"></span>
+        <span class="heatmap-cell" data-level="3"></span>
+        <span class="heatmap-cell" data-level="4"></span>
+        <span>mehr</span>
+      </div>
+    </div>
+    <div id="heatmapContainer"></div>
+  </div>
+
   <div class="card" style="padding:0;overflow:hidden;">
     <table class="overview-table">
       <thead>
@@ -973,6 +1036,137 @@ function renderOverview() {
   const otExclEl=document.getElementById('ovTotalOTExcl');
   otExclEl.textContent=(histOT>=0?'+':'')+fmtMinutes(histOT);
   otExclEl.className='stat-value '+(histOT>0?'positive':histOT<0?'negative':'');
+  renderCalendar();
+  renderHeatmap();
+}
+
+// ─── CALENDAR ─────────────────────────────────────────────────────────────────
+let currentCalMonthOffset=0;
+function getDayMins(dateStr) {
+  return loadEntries().filter(e=>e.date===dateStr).reduce((s,e)=>s+Math.round(entryDurMs(e)/60000),0);
+}
+function prevCalMonth(){ currentCalMonthOffset--; renderCalendar(); }
+function nextCalMonth(){ currentCalMonthOffset++; renderCalendar(); }
+function goToCalDay(dateStr) {
+  const today=new Date(); today.setHours(0,0,0,0);
+  const d=new Date(dateStr+'T00:00');
+  const day=today.getDay();
+  const thisMonday=new Date(today); thisMonday.setDate(today.getDate()-((day+6)%7));
+  const dayMonday=new Date(d); dayMonday.setDate(d.getDate()-((d.getDay()+6)%7));
+  currentWeekOffset=Math.round((dayMonday-thisMonday)/(7*86400000));
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-tracker').classList.add('active');
+  document.querySelector('.nav-tab').classList.add('active');
+  renderEntries();
+}
+function renderCalendar() {
+  const {weeklyHours}=loadSettings();
+  const dailyTargetMins=Math.round(weeklyHours/5*60);
+  const base=new Date(); base.setDate(1);
+  base.setMonth(base.getMonth()+currentCalMonthOffset);
+  const year=base.getFullYear(), month=base.getMonth();
+  document.getElementById('calMonthLabel').textContent=`${MONTH_NAMES[month]} ${year}`;
+  document.getElementById('calWeekdays').innerHTML=
+    ['Mo','Di','Mi','Do','Fr','Sa','So'].map(d=>`<span>${d}</span>`).join('');
+
+  const firstOfMonth=new Date(year,month,1);
+  const startOffset=(firstOfMonth.getDay()+6)%7; // Mo=0
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const todayStr=toDateStr(new Date());
+
+  let html='';
+  for(let i=0;i<startOffset;i++) html+='<div class="calendar-day empty"></div>';
+  for(let day=1; day<=daysInMonth; day++){
+    const dateStr=`${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const mins=getDayMins(dateStr);
+    const isSunday=new Date(year,month,day).getDay()===0;
+    const isToday=dateStr===todayStr;
+    let cls='calendar-day'+(isToday?' today':'');
+    let hoursLabel='';
+    if(mins>0){
+      hoursLabel=fmtMinutes(mins);
+      if(!isSunday){
+        const diff=mins-dailyTargetMins;
+        cls+= diff>60?' cd-over' : diff<-60?' cd-under' : ' cd-ok';
+      } else {
+        cls+=' cd-ok';
+      }
+    }
+    html+=`<div class="${cls}" onclick="goToCalDay('${dateStr}')">
+      <span class="calendar-day-num">${day}</span>
+      <span class="calendar-day-hours">${hoursLabel}</span>
+    </div>`;
+  }
+  document.getElementById('calendarGrid').innerHTML=html;
+}
+
+// ─── HEATMAP ──────────────────────────────────────────────────────────────────
+function renderHeatmap() {
+  const container=document.getElementById('heatmapContainer');
+  const today=new Date(); today.setHours(0,0,0,0);
+  const start=new Date(today); start.setDate(start.getDate()-365);
+  // Align start to Monday
+  start.setDate(start.getDate()-((start.getDay()+6)%7));
+
+  const dayMinsMap={};
+  loadEntries().forEach(e=>{
+    dayMinsMap[e.date]=(dayMinsMap[e.date]||0)+Math.round(entryDurMs(e)/60000);
+  });
+  const maxMins=Math.max(60, ...Object.values(dayMinsMap), 1);
+  function levelFor(mins){
+    if(!mins) return 0;
+    const ratio=mins/maxMins;
+    if(ratio>0.75) return 4;
+    if(ratio>0.5) return 3;
+    if(ratio>0.25) return 2;
+    return 1;
+  }
+
+  const weeks=[];
+  let cur=new Date(start);
+  while(cur<=today){
+    const week=[];
+    for(let i=0;i<7;i++){
+      week.push(toDateStr(cur));
+      cur.setDate(cur.getDate()+1);
+    }
+    weeks.push(week);
+  }
+
+  // Month labels above weeks
+  let monthsHtml='<div class="heatmap-months">';
+  let lastMonth=-1;
+  weeks.forEach((week)=>{
+    const d=new Date(week[0]+'T00:00');
+    const m=d.getMonth();
+    if(m!==lastMonth){
+      monthsHtml+=`<span style="width:14px;flex-shrink:0;">${MONTH_NAMES[m]}</span>`;
+      lastMonth=m;
+    } else {
+      monthsHtml+=`<span style="width:14px;flex-shrink:0;"></span>`;
+    }
+  });
+  monthsHtml+='</div>';
+
+  let bodyHtml='<div style="display:flex;">';
+  bodyHtml+=`<div class="heatmap-weekday-labels"><span>Mo</span><span></span><span>Mi</span><span></span><span>Fr</span><span></span><span>So</span></div>`;
+  bodyHtml+='<div style="display:flex;gap:3px;">';
+  weeks.forEach(week=>{
+    bodyHtml+='<div class="heatmap-week">';
+    week.forEach(dateStr=>{
+      const d=new Date(dateStr+'T00:00');
+      if(d>today){ bodyHtml+=`<span class="heatmap-cell" style="background:transparent;"></span>`; return; }
+      const mins=dayMinsMap[dateStr]||0;
+      const level=levelFor(mins);
+      const label=mins>0?`${dateStr}: ${fmtMinutes(mins)} Std.`:`${dateStr}: keine Einträge`;
+      bodyHtml+=`<span class="heatmap-cell" data-level="${level}" title="${label}"></span>`;
+    });
+    bodyHtml+='</div>';
+  });
+  bodyHtml+='</div></div>';
+
+  container.innerHTML=monthsHtml+bodyHtml;
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
