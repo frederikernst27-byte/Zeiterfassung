@@ -1037,7 +1037,7 @@ function renderOverview() {
   totalOTEl.textContent=(totalOT>=0?'+':'')+fmtMinutes(totalOT);
   totalOTEl.className='stat-value '+(totalOT>0?'positive':totalOT<0?'negative':'');
   document.getElementById('ovTotalEarnings').textContent=formatEuro(totalEarnings);
-  const histOT=hist.reduce((s,h)=>s+parseHM(h.overtime),0);
+  const histOT=hist.filter(h=>h.ym!==currentYM).reduce((s,h)=>s+parseHM(h.overtime),0);
   const otExclEl=document.getElementById('ovTotalOTExcl');
   otExclEl.textContent=(histOT>=0?'+':'')+fmtMinutes(histOT);
   otExclEl.className='stat-value '+(histOT>0?'positive':histOT<0?'negative':'');
