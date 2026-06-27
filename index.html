@@ -680,7 +680,7 @@ async function fetchAll() {
   const did = getDeviceId();
   if (!did) return;
   const [eRes, sRes, hRes, spRes, stRes] = await Promise.all([
-    sb.from('ze_entries').select('*').eq('user_id', did).order('date').order('start_time'),
+    sb.from('ze_entries').select('*').eq('user_id', did).order('date').order('start_time').limit(100000),
     sb.from('ze_settings').select('*').eq('user_id', did).maybeSingle(),
     sb.from('ze_historical').select('*').eq('user_id', did).order('year_month'),
     sb.from('ze_sprints').select('*').eq('user_id', did).order('started_at', {ascending:false}),
@@ -1329,6 +1329,12 @@ function exportExcel(){
     liveByMonth[ym].count++;
   });
   const allYMs=new Set([...hist.map(h=>h.ym),...Object.keys(liveByMonth)]);
+  // Fill in all months from earliest to current so no gaps
+  if(allYMs.size>0){
+    const currentYM2=toDateStr(new Date()).slice(0,7);
+    let cur=[...allYMs].sort()[0];
+    while(cur<=currentYM2){allYMs.add(cur);const[cy,cm]=cur.split('-').map(Number);const nd=new Date(cy,cm,1);cur=toDateStr(nd).slice(0,7);}
+  }
   const sortedYMs=[...allYMs].sort();
 
   const monthRows=sortedYMs.map(ym=>{
