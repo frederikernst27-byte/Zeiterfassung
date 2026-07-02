@@ -1006,7 +1006,7 @@ function renderOverview() {
   for(let i=1;i<=3;i++){ const d=new Date(now.getFullYear(),now.getMonth()+i,1); const ym=toDateStr(d).slice(0,7); if(!allYMs.has(ym))sorted.push(ym); }
   sorted.sort();
   const currentYM=toDateStr(new Date()).slice(0,7);
-  let totalEarnings=0, totalOT=0;
+  let totalEarnings=0, totalOT=0, totalOTExcl=0;
   let rows='';
   sorted.forEach(ym=>{
     const h=hist.find(x=>x.ym===ym), live=liveByMonth[ym];
@@ -1019,7 +1019,7 @@ function renderOverview() {
       const mins=live?.mins||0; targetMins=getMonthlyTargetMins(ym); otMins=mins-targetMins;
       earningEuros=(mins/60)*hourlyRate; hoursStr=fmtMinutes(mins); note=h?.note||'';
     } else { targetMins=getMonthlyTargetMins(ym); hoursStr='—'; otMins=0; earningEuros=0; }
-    if(!isFuture){ totalEarnings+=earningEuros; totalOT+=otMins; }
+    if(!isFuture){ totalEarnings+=earningEuros; totalOT+=otMins; if(!isCurrent)totalOTExcl+=otMins; }
     const [y,m]=ym.split('-');
     const monthLabel=`${MONTH_NAMES[parseInt(m)-1]}-${y.slice(2)}`;
     const monthClass=isCurrent?'current':isFuture?'future':'';
@@ -1037,10 +1037,9 @@ function renderOverview() {
   totalOTEl.textContent=(totalOT>=0?'+':'')+fmtMinutes(totalOT);
   totalOTEl.className='stat-value '+(totalOT>0?'positive':totalOT<0?'negative':'');
   document.getElementById('ovTotalEarnings').textContent=formatEuro(totalEarnings);
-  const histOT=hist.reduce((s,h)=>s+parseHM(h.overtime),0);
   const otExclEl=document.getElementById('ovTotalOTExcl');
-  otExclEl.textContent=(histOT>=0?'+':'')+fmtMinutes(histOT);
-  otExclEl.className='stat-value '+(histOT>0?'positive':histOT<0?'negative':'');
+  otExclEl.textContent=(totalOTExcl>=0?'+':'')+fmtMinutes(totalOTExcl);
+  otExclEl.className='stat-value '+(totalOTExcl>0?'positive':totalOTExcl<0?'negative':'');
   renderCalendar();
   renderHeatmap();
 }
